@@ -29,9 +29,15 @@
 #include <netinet/in.h>
 
 
+#include <arpa/inet.h>
+
 #define nBitsAEnvoyer 20
 int consigne = 2000;
 #define gain 6
+
+#define PORT 1883
+#define BUFFER_SIZE 32
+
 
 // Ce programme peut encore être amélioré, par exemple :
 //   - en gérant les erreurs de temps-réel (à un certain % près)
@@ -166,6 +172,7 @@ int main() {
 
 	// Fonction ajoutée
 	//initSR(0);
+	PWM(0);
 	initRelais();
 	sleep(1);
 	//finRelais(0);
@@ -417,8 +424,8 @@ void* Correcteur(void* arg){
 	// Etape 2 : Ziegler-Nichols
 		//int angleConsigne=(int)consigne;
 		angleConsigne = consigne;
-		int Gain=(int)gain;
-		int nvc = 0;
+		//int Gain=(int)gain;
+		//int nvc = 0;
 
 		float Te=0.004;
 		float Tc=0.226;
@@ -527,7 +534,78 @@ void finRelais(int choix){
 	}
 }
 
+
+
+
+
+void handle_connection(int client_socket) {
+    char buffer[BUFFER_SIZE];
+    int received_value=1;
+    // Receive the character string representing the non-signed integer
+    ssize_t bytes_received = recv(client_socket, buffer, sizeof(buffer) - 1, 0);
+    if (bytes_received > 0) {
+        //buffer[bytes_received] = '\0';
+
+        // Convert the character string to an integer
+        received_value = atoi(buffer);
+        printf("Received integer value: %d\n", received_value);
+        angleConsigne =  received_value;
+    } else {
+        perror("Error receiving data");
+    }
+
+    close(client_socket);
+
+}
+
+
 void* comTCP(void* arg){
+    int server_socket, client_socket;
+    struct sockaddr_in server_address, client_address;
+    socklen_t client_address_len = sizeof(client_address);
+
+    // Create socket
+    if ((server_socket = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
+        perror("Socket creation failed");
+        exit(EXIT_FAILURE);
+    }
+
+    // Set up server address
+    server_address.sin_family = AF_INET;
+    server_address.sin_port = htons(PORT);
+    server_address.sin_addr.s_addr = INADDR_ANY;
+
+    // Bind socket
+    if (bind(server_socket, (struct sockaddr *)&server_address, sizeof(server_address)) == -1) {
+        perror("Bind failed");
+        close(server_socket);
+        exit(EXIT_FAILURE);
+    }
+
+    // Listen for incoming connections
+    if (listen(server_socket, 5) == -1) {
+        perror("Listen failed");
+        close(server_socket);
+        exit(EXIT_FAILURE);
+    }
+
+    printf("Listening on port %d...\n", PORT);
+
+    while (1) {
+        // Accept incoming connection
+        client_socket = accept(server_socket, (struct sockaddr *)&client_address, &client_address_len);
+        if (client_socket == -1) {
+            perror("Accept failed");
+            continue;
+        }
+
+        printf("Accepted connection from %s:%d\n", inet_ntoa(client_address.sin_addr), ntohs(client_address.sin_port));
+
+        // Handle the connection in a separate function
+        handle_connection(client_socket);
+    }
+
+    close(server_socket);
 /*
 	// Create socket
 	    int server_socket = socket(AF_INET, SOCK_STREAM, 0);
@@ -586,9 +664,9 @@ void* comTCP(void* arg){
 
 	    // Close the server socket (this will not be reached in this example)
 	    close(server_socket);
-
-	    return NULL;
 */
+	    return NULL;
+
 
 }
 
