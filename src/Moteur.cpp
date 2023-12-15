@@ -30,7 +30,7 @@
 
 
 #define nBitsAEnvoyer 20
-int consigne = 5000;
+int consigne = 2000;
 #define gain 6
 
 // Ce programme peut encore être amélioré, par exemple :
@@ -112,8 +112,8 @@ int utime=600000;
 int TX();
 void* Correcteur(void *arg);
 
-
-
+int exp2(int exponent);
+int exptt(int base, int exponent);
 int main() {
 	// Initialiser WiringPi
 	wiringPiSetup();
@@ -165,6 +165,7 @@ int main() {
 	pthread_create(&thread_MasterRequest, NULL, &ChangeStatePin, NULL);
 
 	// Fonction ajoutée
+	//initSR(0);
 	initRelais();
 	sleep(1);
 	//finRelais(0);
@@ -258,7 +259,7 @@ void initTX(){
 	digitalWrite(TXPin, LOW);
 	int stateRX=1;
 	while(stateRX!=0){
-		stateRX=digitalRead(RXPin);
+		stateRX=digitalRead(RXPin);18
 		std::cout << "Attend RX" << std::endl;
 		usleep(1);
 
@@ -289,6 +290,15 @@ int exp2(int exponent){
     for (int i = 0; i < exponent; ++i) {
         result_multiply *= base;
     }
+    return result_multiply;
+}
+int exptt(int base, int exponent){
+	int result_multiply = 1;
+
+	for (int i = 0; i < exponent; ++i) {
+		result_multiply *= base;
+	}
+
     return result_multiply;
 }
 int TX(){
@@ -410,12 +420,31 @@ void* Correcteur(void* arg){
 		int Gain=(int)gain;
 		int nvc = 0;
 
+		float Te=0.004;
 		float Tc=0.226;
 		float Kp=0.3;
 		float Ti=0.83*Tc;
 		float Td=(Tc/8);
-		float Ki=Kp/Ti;
-		//float Kd=Kp/Ti;
+		float Ki=1/Ti;
+		float Kd=1/Td;
+
+
+		float DiviseurKp=0;
+		if(consigne<=2000){
+		DiviseurKp=(0.0000026*exptt(consigne,2)) + (0.00032*exptt(consigne,1)) + 2.31;//(0.00000000000049502762*exptt(consigne,4))- (0.00000000507315463776*exptt(consigne,3)) + (0.00001619760699757390*exptt(consigne,2 ))- (0.01213462811081350000*exptt(consigne,1))+ 5.60653903558871000000;
+		} else if (consigne<=10000) {
+		DiviseurKp= (-0.00000021*exptt(consigne,2)) + (0.0048*consigne) + 5.04;
+		} else {
+		DiviseurKp=32;
+		}
+
+		//Kp=Kp/25;//5000
+		//Kp = Kp/2.85;
+		Kp = Kp/DiviseurKp;
+		Ki=Ki/1;
+		Kd=Kd/10000;
+
+
 
 		float accumulIntegral=0;
 		ecartPrecedent=0;
@@ -442,12 +471,27 @@ void* Correcteur(void* arg){
 			}*/
 
 			int PWM_FCT_Ecart = (int)((abs(ecart)/360)*1024);
+			integral=(Ki*Te*ecart)+(0.9985*integral);
+			/*
+			if(ecart<100){
+				integral-=10*Ki*Te*ecart;
+			}
+			else{
+				integral+=Ki*Te*ecart;
+			}
+			*/
+			std::cout << "integral : "<<integral<<std::endl;
+			std::cout << "ecart : "<<ecart<<std::endl;
 
-			integral+=ecart;
+			/*int integralLimite=500000;
+			if(integral>=integralLimite){
+				integral=integralLimite;
+				//integral-=Ki*Te*ecart;
+			}*/
 
-
-			sortie = Kp*(ecart + (Ki*integral));
-
+			sortie = abs(Kp*(ecart + integral + ((Kd/Te) * (ecart-ecartPrecedent))));
+			std::cout << "sortie : "<<sortie<<std::endl;
+			//std::cout << "sortie : "<<sortie<<std::endl;
 			//sortie = Kp*(proportionnel + integral);
 
 			if(ecart>0){
@@ -456,9 +500,16 @@ void* Correcteur(void* arg){
 				initSR(0);
 			}
 			//PWM(sortie*ecart);
-			std::cout << "PWM : "<<PWM_FCT_Ecart<<std::endl;
+			//std::cout << "PWM : "<<PWM_FCT_Ecart<<std::endl;
 
-			PWM(PWM_FCT_Ecart);
+			PWM(sortie);
+			/*
+			if(abs(ecart)>10){
+			PWM(sortie);
+			} else {
+			PWM(0);
+			}
+			*/
 			ecartPrecedent = ecart;
 			usleep(4000);
 
@@ -477,7 +528,7 @@ void finRelais(int choix){
 }
 
 void* comTCP(void* arg){
-
+/*
 	// Create socket
 	    int server_socket = socket(AF_INET, SOCK_STREAM, 0);
 	    if (server_socket == -1) {
@@ -537,7 +588,7 @@ void* comTCP(void* arg){
 	    close(server_socket);
 
 	    return NULL;
-
+*/
 
 }
 
