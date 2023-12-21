@@ -27,17 +27,25 @@
 #include <stdlib.h>
 #include <string.h>
 #include <netinet/in.h>
+#include <semaphore.h>
 
-
+//TCP
 #include <arpa/inet.h>
+#include <errno.h>
 
-#define nBitsAEnvoyer 20
-int consigne = 2000;
+
+#define nBitsAEnvoyer 20 //Taille max du buffer d'envoi
 #define gain 6
-
+//TCP
 #define PORT 1883
 #define BUFFER_SIZE 32
+#define PERIODE_CORRECTEUR 4000 // us
+#define PERIODE_ECHEC 10000000 // us
 
+int consigne = 0; // consigne initiale hard codée
+float DiviseurKp; //Facteur de division du kp
+float Kp;
+float FacteurOubli=0.9985;//FacteurOubli=0.9985;
 
 // Ce programme peut encore être amélioré, par exemple :
 //   - en gérant les erreurs de temps-réel (à un certain % près)
@@ -71,11 +79,15 @@ const int sr2Pin=10;
 const int pinMasterRequest=15;
 
 int angle=0;
+int anglePrecedent=0;
+int angleMax=65535;
 int ecart;
 int ecartPrecedent;
 int angleConsigne;
 pthread_mutex_t mutexAngle;
 pthread_mutex_t mutexAngleConsigne;
+
+sem_t* semDemarrage;
 
 // CODE AJOUTEE !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! FIN
 
@@ -120,7 +132,17 @@ void* Correcteur(void *arg);
 
 int exp2(int exponent);
 int exptt(int base, int exponent);
+void* ChangeStatePin(void* arg);
 int main() {
+
+
+	// Allocation dynamique de la mémoire pour le sémaphore
+	semDemarrage = (sem_t*)malloc(sizeof(sem_t));
+	// Initialisation du sémaphore avec la valeur initiale 1
+	sem_init(semDemarrage, 0, 0);
+
+
+
 	// Initialiser WiringPi
 	wiringPiSetup();
 	pinMode(pwmPin, PWM_OUTPUT);
@@ -166,7 +188,7 @@ int main() {
 	initRX();
 	initTX();
 
-	void* ChangeStatePin(void* arg);
+
 	pthread_t thread_MasterRequest;
 	pthread_create(&thread_MasterRequest, NULL, &ChangeStatePin, NULL);
 
@@ -174,9 +196,9 @@ int main() {
 	//initSR(0);
 	PWM(0);
 	initRelais();
-	sleep(1);
+	//sleep(1);
 	//finRelais(0);
-
+	sem_post(semDemarrage);
 	 while(1){
 		 /*
 		initSR(0);
@@ -204,16 +226,6 @@ int main() {
 }
 
 
-void periodicComputation() {
-	// TODO Dans cette fonction, on peut mettre un calcul qui sera exécuté de manière
-	// (quasi-)périodique par la RT software clock
-
-	// Ici on va juste simuler un calcul aléatoire inutile
-	int numIter = rand() % 100;
-	int uselessInt = 0;
-	for (int i = 0 ; i < numIter ; i++)
-		uselessInt = (uselessInt + rand()) % 1000;
-}
 void initSR(int sens){
 	if (sens==0) {
 		pinMode(sr1Pin, OUTPUT);
@@ -315,33 +327,37 @@ int TX(){
 	int stateRX=1;
 	while(stateRX!=0){
 		stateRX=digitalRead(RXPin);
-		std::cout << "Attend RX" << std::endl;
+		//std::cout << "Attend RX" << std::endl;
 		usleep(1);
 	}
 	int nBitsEnvoye=0;
 	while(nBitsEnvoye<nBitsAEnvoyer){
 		usleep(50);
 		digitalWrite(TXPin, HIGH);
-		std::cout << "Front montant" << std::endl;
+		//std::cout << "Front montant" << std::endl;
 		usleep(25);
 		messageRX[nBitsEnvoye]=digitalRead(RXPin);
 		nBitsEnvoye+=1;
 		usleep(25);
 		digitalWrite(TXPin, LOW);
-		std::cout << "Front descendant" << std::endl;
+		//std::cout << "Front descendant" << std::endl;
 	}
-	std::cout << "Fin message" << std::endl;
+	//std::cout << "Fin message" << std::endl;
 	digitalWrite(TXPin, HIGH);
 
 	int resultat=0;
 	for (int i=0;i<16;i++){
-		std::cout << "messageRX case n° "<< i<< " : " << messageRX[i] <<std::endl;
+		//std::cout << "messageRX case n° "<< i<< " : " << messageRX[i] <<std::endl;
 		resultat=resultat+(messageRX[i]*exp2(i));
 	}
-	std::cout << "resultat : "<<resultat<<std::endl;
+	//std::cout << "resultat : "<<resultat<<std::endl;
 	usleep(2000);
 	pthread_mutex_lock(&mutexAngle);
-	angle=resultat;
+		anglePrecedent=angle;
+		angle=resultat;
+		if(abs(angle-anglePrecedent)>30000){
+			angle=resultat-angleMax;
+		}
 	pthread_mutex_unlock(&mutexAngle);
 	return resultat;
 
@@ -352,105 +368,50 @@ int readRX(){
 }
 
 
+
+void FonctionnementNormal(){
+
+}
+
 void* Correcteur(void* arg){
-	// Etape 1 : On multplie par le gain de 6 pour se mettre en pompage
-	/*
-	 	int angleConsigne=(int)consigne;
-	int Gain=(int)gain;
-	while(1){
-		pthread_mutex_lock(&mutexAngle);
-		int angleCorrecteur=angle;
-		pthread_mutex_unlock(&mutexAngle);
-		int ecart=angleConsigne-angleCorrecteur;
-		std::cout << "ecart : "<<ecart<<std::endl;
-		if(ecart>0){
-			initSR(1);
-			PWM(ecart*Gain);
-		} else if(ecart<0){
-			initSR(0);
-			PWM(ecart*Gain);
-		}
-		usleep(4000);
-	}
-	return NULL;
-	 *//*
-	// Etape 2 : Ziegler-Nichols
-	int angleConsigne=(int)consigne;
-	int Gain=(int)gain;
-
-	float Tc=0.226;
-	float Kp=Gain/1.7;
-	float Ti=Tc/2;
-	float Td=(Tc/8);
 
 
-	float accumulIntegral=0;
-	float ecartPrecedent=0;
 
-	float proportionnel=0;
-	float derive=0;
-	float integral=0;
+	// Utilisation de sem_wait pour attendre que le sémaphore devienne disponible
+	sem_wait(semDemarrage);
 
-	float sortie;
-	float DeltaT=0.004;
 
-	while(1){
-		pthread_mutex_lock(&mutexAngle);
-		int angleCorrecteur=angle;
-		pthread_mutex_unlock(&mutexAngle);
-
-		int ecart=angleConsigne-angleCorrecteur;
-
-		proportionnel = 0.1; //ecart;
-		derive = 0;
-		//derive = (1/Td)*(ecart - ecartPrecedent) / DeltaT;
-		accumulIntegral += ecart ;//* DeltaT;
-		integral = (proportionnel/Ti) * accumulIntegral;
-
-		ecartPrecedent=ecart;
-
-		sortie = Kp*(proportionnel + derive + integral);
-		//sortie = Kp*(proportionnel + integral);
-
-		if(ecart>0){
-			initSR(1);
-		} else if(ecart<0){
-			initSR(0);
-		}
-		PWM(sortie*ecart);
-		usleep(4000);
-	}
-	*/
 	// Etape 2 : Ziegler-Nichols
 		//int angleConsigne=(int)consigne;
 		angleConsigne = consigne;
 		//int Gain=(int)gain;
 		//int nvc = 0;
-
 		float Te=0.004;
 		float Tc=0.226;
-		float Kp=0.3;
+		Kp=0.3;
 		float Ti=0.83*Tc;
 		float Td=(Tc/8);
 		float Ki=1/Ti;
 		float Kd=1/Td;
 
 
-		float DiviseurKp=0;
-		if(consigne<=2000){
-		DiviseurKp=(0.0000026*exptt(consigne,2)) + (0.00032*exptt(consigne,1)) + 2.31;//(0.00000000000049502762*exptt(consigne,4))- (0.00000000507315463776*exptt(consigne,3)) + (0.00001619760699757390*exptt(consigne,2 ))- (0.01213462811081350000*exptt(consigne,1))+ 5.60653903558871000000;
-		} else if (consigne<=10000) {
-		DiviseurKp= (-0.00000021*exptt(consigne,2)) + (0.0048*consigne) + 5.04;
-		} else {
-		DiviseurKp=32;
-		}
 
-		//Kp=Kp/25;//5000
-		//Kp = Kp/2.85;
-		Kp = Kp/DiviseurKp;
-		Ki=Ki/1;
-		Kd=Kd/10000;
 
+			DiviseurKp=0;
+			if(angleConsigne<=2500){
+			DiviseurKp=(0.0000016*exptt(angleConsigne,2)) + (0.0001136*exptt(angleConsigne,1)) + 0.0497947;//(0.00000000000049502762*exptt(consigne,4))- (0.00000000507315463776*exptt(consigne,3)) + (0.00001619760699757390*exptt(consigne,2 ))- (0.01213462811081350000*exptt(consigne,1))+ 5.60653903558871000000;
+			} else if (angleConsigne<=10000) {
+			DiviseurKp= (0.002*angleConsigne)+5;
+			} else {
+			DiviseurKp=32;
+			}
+
+
+			//Kp=Kp/25;//5000
+			//Kp = Kp/2.85;
+			Kp = Kp/DiviseurKp;
+			Ki=Ki/1;
+			Kd=Kd/10000;
 
 
 		float accumulIntegral=0;
@@ -460,65 +421,91 @@ void* Correcteur(void* arg){
 		float derive=0;
 		float integral=0;
 
-		float sortie;
+		float sortie = 0;
 		float DeltaT=0.004;
+
+		int compteurErreur = 0;
 
 
 
  		while(1){
-
 			pthread_mutex_lock(&mutexAngle);
 			int angleCorrecteur=angle;
 			pthread_mutex_unlock(&mutexAngle);
 
 			ecart=angleConsigne-angleCorrecteur;
-			/*if(ecart==ecartPrecedent){
-				angleConsigne += consigne;
-				nvc = 1;
-			}*/
 
-			int PWM_FCT_Ecart = (int)((abs(ecart)/360)*1024);
-			integral=(Ki*Te*ecart)+(0.9985*integral);
-			/*
-			if(ecart<100){
-				integral-=10*Ki*Te*ecart;
-			}
-			else{
-				integral+=Ki*Te*ecart;
-			}
-			*/
-			std::cout << "integral : "<<integral<<std::endl;
-			std::cout << "ecart : "<<ecart<<std::endl;
+ 			int Erreur=0;
+ 			if((sortie>500)&&(ecart==ecartPrecedent)){
+ 				Erreur=1;
+ 			}
+ 			switch (Erreur) {
+				case 1: // Rotor bloqué
+					//PWM(0);
+					//perror("Erreur Rotor bloqué");
+					//std::cout << "Erreur Rotor bloqué "<<std::endl;
+					//return NULL;
+					compteurErreur++;
+					std::cout << "compteurErreur "<< compteurErreur  <<std::endl;
+					if(compteurErreur==(((int)PERIODE_ECHEC)/((int)PERIODE_CORRECTEUR))){
+						//Erreur = 1000;
+						PWM(0);
+						compteurErreur=0;
+						fprintf(stderr,"Erreur détectée, moteur arrêté, angle actuel : %f",angleCorrecteur);
+						std::cout << "angleCorrecteur "<< angleCorrecteur  <<std::endl;
+						std::cout << "compteurErreur "<< compteurErreur  <<std::endl;
+						return NULL;
+					}
+					break;
+				case 2: // Relais éteint
+					PWM(0);
+					std::cout << "Relais éteint "<<std::endl;
+					return NULL;
+ 				}
+					std::cout << "DiviseurKp : "<<DiviseurKp<<std::endl;
 
-			/*int integralLimite=500000;
-			if(integral>=integralLimite){
-				integral=integralLimite;
-				//integral-=Ki*Te*ecart;
-			}*/
+								int PWM_FCT_Ecart = (int)((abs(ecart)/360)*1024);
+								integral=(Ki*Te*ecart)+(FacteurOubli*integral);
+								/*
+								if(ecart<100){
+									integral-=10*Ki*Te*ecart;
+								}
+								else{
+									integral+=Ki*Te*ecart;
+								}
+								*/
+								std::cout << "integral : "<<integral<<std::endl;
+								std::cout << "ecart : "<<ecart<<std::endl;
 
-			sortie = abs(Kp*(ecart + integral + ((Kd/Te) * (ecart-ecartPrecedent))));
-			std::cout << "sortie : "<<sortie<<std::endl;
-			//std::cout << "sortie : "<<sortie<<std::endl;
-			//sortie = Kp*(proportionnel + integral);
+								/*int integralLimite=500000;
+								if(integral>=integralLimite){
+									integral=integralLimite;
+									//integral-=Ki*Te*ecart;
+								}*/
 
-			if(ecart>0){
-				initSR(1);
-			} else if(ecart<0){
-				initSR(0);
-			}
-			//PWM(sortie*ecart);
-			//std::cout << "PWM : "<<PWM_FCT_Ecart<<std::endl;
+								sortie = abs(Kp*(ecart + integral + ((Kd/Te) * (ecart-ecartPrecedent))));
+								std::cout << "sortie : "<<sortie<<std::endl;
+								//std::cout << "sortie : "<<sortie<<std::endl;
+								//sortie = Kp*(proportionnel + integral);
 
-			PWM(sortie);
-			/*
-			if(abs(ecart)>10){
-			PWM(sortie);
-			} else {
-			PWM(0);
-			}
-			*/
-			ecartPrecedent = ecart;
-			usleep(4000);
+								if(ecart>0){
+									initSR(1);
+								} else if(ecart<0){
+									initSR(0);
+								}
+								//PWM(sortie*ecart);
+								//std::cout << "PWM : "<<PWM_FCT_Ecart<<std::endl;
+
+								PWM(sortie);
+								/*
+								if(abs(ecart)>10){
+								PWM(sortie);
+								} else {
+								PWM(0);
+								}
+								*/
+								ecartPrecedent = ecart;
+			usleep((int)PERIODE_CORRECTEUR);
 
 		}
 	return NULL;
@@ -534,10 +521,6 @@ void finRelais(int choix){
 	}
 }
 
-
-
-
-
 void handle_connection(int client_socket) {
     char buffer[BUFFER_SIZE];
     int received_value=1;
@@ -550,6 +533,18 @@ void handle_connection(int client_socket) {
         received_value = atoi(buffer);
         printf("Received integer value: %d\n", received_value);
         angleConsigne =  received_value;
+        ecart=received_value-angle;
+		if(ecart<=2500){
+			DiviseurKp=(0.0000016*exptt(ecart,2)) + (0.0001136*exptt(ecart,1)) + 0.0497947;//(0.00000000000049502762*exptt(consigne,4))- (0.00000000507315463776*exptt(consigne,3)) + (0.00001619760699757390*exptt(consigne,2 ))- (0.01213462811081350000*exptt(consigne,1))+ 5.60653903558871000000;
+		} else if (ecart<=10000) {
+			DiviseurKp= (0.002*ecart)+5;
+		} else {
+			DiviseurKp=32;
+		}
+		//Kp=Kp/25;//5000
+		//Kp = Kp/2.85;
+
+		Kp = 0.3/DiviseurKp;
     } else {
         perror("Error receiving data");
     }
@@ -558,8 +553,8 @@ void handle_connection(int client_socket) {
 
 }
 
-
 void* comTCP(void* arg){
+
     int server_socket, client_socket;
     struct sockaddr_in server_address, client_address;
     socklen_t client_address_len = sizeof(client_address);
@@ -574,6 +569,7 @@ void* comTCP(void* arg){
     server_address.sin_family = AF_INET;
     server_address.sin_port = htons(PORT);
     server_address.sin_addr.s_addr = INADDR_ANY;
+
 
     // Bind socket
     if (bind(server_socket, (struct sockaddr *)&server_address, sizeof(server_address)) == -1) {
@@ -606,65 +602,7 @@ void* comTCP(void* arg){
     }
 
     close(server_socket);
-/*
-	// Create socket
-	    int server_socket = socket(AF_INET, SOCK_STREAM, 0);
-	    if (server_socket == -1) {
-	        perror("Socket creation failed");
-	        exit(EXIT_FAILURE);
-	    }
 
-	    // Prepare sockaddr_in structure
-	    struct sockaddr_in server_address;
-	    server_address.sin_family = AF_INET;
-	    server_address.sin_addr.s_addr = INADDR_ANY;
-	    server_address.sin_port = htons(PORT);
-
-	    // Bind the socket
-	    if (bind(server_socket, (struct sockaddr*)&server_address, sizeof(server_address)) < 0) {
-	        perror("Bind failed");
-	        exit(EXIT_FAILURE);
-	    }
-
-	    // Listen for incoming connections
-	    if (listen(server_socket, 5) < 0) {
-	        perror("Listen failed");
-	        exit(EXIT_FAILURE);
-	    }
-
-	    while (1) {
-	        printf("Waiting for connections...\n");
-
-	        // Accept connection
-	        int client_socket = accept(server_socket, NULL, NULL);
-	        if (client_socket < 0) {
-	            perror("Accept failed");
-	            continue;  // Continue to the next iteration
-	        }
-
-	        printf("Connection accepted!\n");
-
-	        char buffer[BUFFER_SIZE];
-	        memset(buffer, 0, sizeof(buffer));
-
-	        // Receive data from the client
-	        int bytesRead = recv(client_socket, buffer, sizeof(buffer), 0);
-	        if (bytesRead < 0) {
-	            perror("Receive failed");
-	        } else if (bytesRead == 0) {
-	            printf("Client disconnected\n");
-	        } else {
-	            // Process received data (you can replace this with your own logic)
-	            printf("Received data: %s\n", buffer);
-	        }
-
-	        // Close the client socket
-	        close(client_socket);
-	    }
-
-	    // Close the server socket (this will not be reached in this example)
-	    close(server_socket);
-*/
 	    return NULL;
 
 
@@ -680,6 +618,7 @@ void* ChangeStatePin(void* arg){ // 20x plus vite que le fréquence du PID à 23
 	}
 	return 0;  // pointeur sur rien du tout
 }
+
 void* rtSoftTimerThread(void* arg) {
 	// Changement politique et priorité
 	struct sched_param params;
@@ -726,7 +665,8 @@ void* rtSoftTimerThread(void* arg) {
 		digitalWrite(clockPin, (int)pinHigh);
 
 		// TODO doc: something can be done here
-		periodicComputation();
+
+
 		// Condition de sortie: si le temps de run en secondes est dépassé
 		if ((iterationStartTime.tv_sec - TIMER_RUN_TIME_S) > startTime.tv_sec)
 			continueTimer = false;
@@ -749,8 +689,6 @@ void* rtSoftTimerThread(void* arg) {
 		else
 			naiveSleepUntil(&sleepEndTime);
 	}
-
-
 	// Fin du thread
 	digitalWrite(clockPin, LOW);
 	digitalWrite(dbgPin, LOW);
@@ -772,6 +710,7 @@ void* clockTimer(void* arg) {
 		TX();
 	}
 	*/
+	return NULL;
 }
 
 void timespecDiff(const struct timespec* start, const struct timespec* end, struct timespec* duration) {
