@@ -29,6 +29,9 @@
 #include <netinet/in.h>
 #include <semaphore.h>
 
+#include <signal.h> // gestion des signaux (pour nous : fermeture du programme)
+
+
 //TCP
 #include <arpa/inet.h>
 #include <errno.h>
@@ -103,12 +106,20 @@ int anglePrecedent=0;
 int angleMax=65535;
 int ecart;
 int ecartPrecedent;
+int ecartDixPrecedent;
 int angleConsigne;
+
+
+
+
+int server_socket, client_socket;
+
+
 pthread_mutex_t mutexAngle;
 pthread_mutex_t mutexAngleConsigne;
 
 sem_t* semDemarrage;
-
+sem_t* semDemarrageCom;
 // CODE AJOUTEE !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! FIN
 
 // Fonctions du timer lui-même
@@ -129,19 +140,84 @@ void initRX();
 void initTX();
 
 int utime=600000;
-int TX();
+void* TX(void* arg);
+void TXnaif();
 void* Correcteur(void *arg);
 
 int exp2(int exponent);
 int exptt(int base, int exponent);
 void* ChangeStatePin(void* arg);
+
+
+
+// Prototypes
+
+void generalSignalHandler(int);
+void terminerProgramme();
+// Création et initialisation de la structure POSIX
+
+
+
+
+void generalSignalHandler(int signal)
+
+{
+
+ if (signal == SIGTERM)
+
+ {
+
+ std::cout << std::endl << "Exécution de terminerProgramme() en cours..." << std::endl;
+
+ terminerProgramme();
+
+ std::cout << "Fin." << std::endl;
+
+ exit(0);
+
+ }
+
+ else
+
+ std::cerr << "Signal non-géré" << std::endl;
+
+}
+
+
+
+// Activation des destructions__________________________________________________
+void terminerProgramme()
+{
+	free(semDemarrage);
+	close(client_socket);
+	std::cout << "terminerProgramme." << std::endl;
+}
+
+
+
+
 int main() {
+
+	/*************** GESTION SIGTERM ************************/
+	struct sigaction signalAction;
+	sigemptyset(&signalAction.sa_mask);
+	signalAction.sa_flags = 0;
+	// Fonction appelée lors de la signalisation
+	signalAction.sa_handler = &generalSignalHandler;
+	// Interception de SIGTERM uniquement
+	if (sigaction(SIGTERM, &signalAction, NULL) == -1) // si erreur
+	std::cerr << "Impossible d'intercepter SIGTERM !" << std::endl;
+
+	/***********************************************************/
 
 
 	// Allocation dynamique de la mémoire pour le sémaphore
 	semDemarrage = (sem_t*)malloc(sizeof(sem_t));
+	semDemarrageCom = (sem_t*)malloc(sizeof(sem_t));
 	// Initialisation du sémaphore avec la valeur initiale 1
 	sem_init(semDemarrage, 0, 0);
+	sem_init(semDemarrageCom, 0, 0);
+
 
 
 
@@ -159,6 +235,7 @@ int main() {
 	pthread_t clockThreadTid;
 	pthread_t correcteurThreadTid;
 	pthread_t TCPTid;
+	pthread_t TXTid;
 	// Configuration et lancement du thread
 	pthread_attr_t threadAttributes;
 	pthread_attr_init(&threadAttributes);
@@ -188,6 +265,14 @@ int main() {
 	pthread_create(&TCPTid, &threadComTCP, &comTCP, 0);
 	pthread_attr_destroy(&threadComTCP);
 	////////////////////////////////////////
+	////////////////////////////////////////
+
+	pthread_attr_t threadTX;
+	pthread_attr_init(&threadTX);
+	pthread_attr_setdetachstate(&threadTX, PTHREAD_CREATE_JOINABLE);
+	//pthread_create(&TXTid, &threadTX, &TX, 0);
+	//pthread_attr_destroy(&threadTX);
+	////////////////////////////////////////
 	initRX();
 	initTX();
 
@@ -202,6 +287,7 @@ int main() {
 	//sleep(1);
 	//finRelais(0);
 	sem_post(semDemarrage);
+
 	 while(1){
 		 /*
 		initSR(0);
@@ -210,7 +296,8 @@ int main() {
 		usleep(utime);
 		*/
 		//pthread_mutex_lock(&mutexAngle);
-		TX();
+		//TX();
+		 TXnaif();
 		/*if(ecart==ecartPrecedent){
 			angleConsigne += consigne;
 			PWM(0);
@@ -323,47 +410,104 @@ int exptt(int base, int exponent){
 
     return result_multiply;
 }
-int TX(){
-	bool pinHigh = false;
-	digitalWrite(TXPin, LOW);
-	//int local_consigne = consigne;
-	int stateRX=1;
-	while(stateRX!=0){
-		stateRX=digitalRead(RXPin);
-		//std::cout << "Attend RX" << std::endl;
-		usleep(1);
-	}
-	int nBitsEnvoye=0;
-	while(nBitsEnvoye<nBitsAEnvoyer){
-		usleep(50);
-		digitalWrite(TXPin, HIGH);
-		//std::cout << "Front montant" << std::endl;
-		usleep(25);
-		messageRX[nBitsEnvoye]=digitalRead(RXPin);
-		nBitsEnvoye+=1;
-		usleep(25);
+
+void TXnaif(){
+
+
+		bool pinHigh = false;
 		digitalWrite(TXPin, LOW);
-		//std::cout << "Front descendant" << std::endl;
-	}
-	//std::cout << "Fin message" << std::endl;
-	digitalWrite(TXPin, HIGH);
-
-	int resultat=0;
-	for (int i=0;i<16;i++){
-		//std::cout << "messageRX case n° "<< i<< " : " << messageRX[i] <<std::endl;
-		resultat=resultat+(messageRX[i]*exp2(i));
-	}
-	//std::cout << "resultat : "<<resultat<<std::endl;
-	usleep(2000);
-	pthread_mutex_lock(&mutexAngle);
-		anglePrecedent=angle;
-		angle=resultat;
-		if(abs(angle-anglePrecedent)>30000){
-			angle=resultat-angleMax;
+		//int local_consigne = consigne;
+		int stateRX=1;
+		while(stateRX!=0){
+			stateRX=digitalRead(RXPin);
+			//std::cout << "Attend RX" << std::endl;
+			usleep(1);
 		}
-	pthread_mutex_unlock(&mutexAngle);
-	return resultat;
+		int nBitsEnvoye=0;
+		while(nBitsEnvoye<nBitsAEnvoyer){
+			usleep(50);
+			digitalWrite(TXPin, HIGH);
+			//std::cout << "Front montant" << std::endl;
+			usleep(25);
+			messageRX[nBitsEnvoye]=digitalRead(RXPin);
+			nBitsEnvoye+=1;
+			usleep(25);
+			digitalWrite(TXPin, LOW);
+			//std::cout << "Front descendant" << std::endl;
+		}
+		//std::cout << "Fin message" << std::endl;
+		digitalWrite(TXPin, HIGH);
 
+		int resultat=0;
+		for (int i=0;i<16;i++){
+			//std::cout << "messageRX case n° "<< i<< " : " << messageRX[i] <<std::endl;
+			resultat=resultat+(messageRX[i]*exp2(i));
+		}
+		//std::cout << "resultat : "<<resultat<<std::endl;
+		usleep(2000);
+		pthread_mutex_lock(&mutexAngle);
+			anglePrecedent=angle;
+			angle=resultat;
+			if(abs(angle-anglePrecedent)>30000){
+				angle=resultat-angleMax;
+			}
+		pthread_mutex_unlock(&mutexAngle);
+
+		}
+
+void* TX(void* arg){
+	// Changement politique et priorité
+		struct sched_param params;
+		params.sched_priority = 99;
+		pthread_setschedparam(pthread_self(), SCHED_FIFO, &params);
+		// Vérification du changement
+		int policy;
+		pthread_getschedparam(pthread_self(), &policy, &params);
+		std::cout << "Thread RT:  SCHED_FIFO=" << std::boolalpha << (policy == SCHED_FIFO)
+				<< "  prio=" << params.sched_priority << std::endl;
+	sem_wait(semDemarrageCom);
+	while(1){
+		bool pinHigh = false;
+		digitalWrite(TXPin, LOW);
+		//int local_consigne = consigne;
+		int stateRX=1;
+		while(stateRX!=0){
+			stateRX=digitalRead(RXPin);
+			//std::cout << "Attend RX" << std::endl;
+			usleep(1);
+		}
+		int nBitsEnvoye=0;
+		while(nBitsEnvoye<nBitsAEnvoyer){
+			usleep(50);
+			digitalWrite(TXPin, HIGH);
+			//std::cout << "Front montant" << std::endl;
+			usleep(25);
+			messageRX[nBitsEnvoye]=digitalRead(RXPin);
+			nBitsEnvoye+=1;
+			usleep(25);
+			digitalWrite(TXPin, LOW);
+			//std::cout << "Front descendant" << std::endl;
+		}
+		//std::cout << "Fin message" << std::endl;
+		digitalWrite(TXPin, HIGH);
+
+		int resultat=0;
+		for (int i=0;i<16;i++){
+			//std::cout << "messageRX case n° "<< i<< " : " << messageRX[i] <<std::endl;
+			resultat=resultat+(messageRX[i]*exp2(i));
+		}
+		//std::cout << "resultat : "<<resultat<<std::endl;
+		usleep(2000);
+		pthread_mutex_lock(&mutexAngle);
+			anglePrecedent=angle;
+			angle=resultat;
+			if(abs(angle-anglePrecedent)>30000){
+				angle=resultat-angleMax;
+			}
+		pthread_mutex_unlock(&mutexAngle);
+
+		}
+	return NULL;
 	}
 
 int readRX(){
@@ -460,6 +604,11 @@ void* Correcteur(void* arg){
 				case 2: // Relais éteint
 					PWM(0);
 					std::cout << "Relais éteint "<<std::endl;
+compteurErreur 1250
+Erreur détectée, moteur arrêté, angle actuel : 8924
+angleCorrecteur 8924
+compteurErreur 0
+
 					return NULL;
  				}
 					std::cout << "DiviseurKp : "<<DiviseurKp<<std::endl;
@@ -536,7 +685,7 @@ void handle_connection(int client_socket) {
 
 void* comTCP(void* arg){
 
-    int server_socket, client_socket;
+
     struct sockaddr_in server_address, client_address;
     socklen_t client_address_len = sizeof(client_address);
 
@@ -742,7 +891,11 @@ void* rtSoftTimerThreadCorrecteur(void* arg) {
 	struct timespec startTime, iterationStartTime, sleepEndTime;
 	clock_gettime(CLOCK_MONOTONIC_RAW, &startTime);
 	bool continueTimer = true;
+
+	sem_post(semDemarrageCom);
+	int variableBoucle=0;
 	while (continueTimer) {
+		variableBoucle++;
 		// inc !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 		pthread_mutex_lock(&mutexINC);
 		INC=(INC+1)%(ratioTemps+1);
@@ -763,8 +916,12 @@ void* rtSoftTimerThreadCorrecteur(void* arg) {
 		ecart=angleConsigne-angleCorrecteur;
 
 		int Erreur=0;
-		if((sortie>100)&&(ecart==ecartPrecedent)){
+		if((sortie>300)&&(ecart>10)&&(ecart==ecartPrecedent)){
 			Erreur=1;
+			if(ecart != ecartDixPrecedent){
+				compteurErreur=0;
+			}
+			std::cout << "Erreur détectée !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"  <<std::endl;
 		}
 		switch (Erreur) {
 		case 1: // Rotor bloqué
@@ -773,6 +930,7 @@ void* rtSoftTimerThreadCorrecteur(void* arg) {
 			//std::cout << "Erreur Rotor bloqué "<<std::endl;
 			//return NULL;
 			compteurErreur++;
+			Erreur=0;
 			std::cout << "compteurErreur "<< compteurErreur  <<std::endl;
 			if(compteurErreur==(((int)PERIODE_ECHEC)/((int)PERIODE_CORRECTEUR))){
 				//Erreur = 1000;
@@ -833,6 +991,9 @@ void* rtSoftTimerThreadCorrecteur(void* arg) {
 			}
 			*/
 			ecartPrecedent = ecart;
+			if(variableBoucle%5==0){
+				ecartDixPrecedent = ecart;
+			}
 		//usleep((int)PERIODE_CORRECTEUR);
 		/********************************************************************/
 
