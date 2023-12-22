@@ -58,7 +58,7 @@
 #define PORT 1883
 #define BUFFER_SIZE 32
 #define PERIODE_CORRECTEUR 4000 // us
-#define PERIODE_ECHEC 10000000 // us
+#define PERIODE_ECHEC 5000000 // us
 
 
 
@@ -512,7 +512,7 @@ void handle_connection(int client_socket) {
 
         // Convert the character string to an integer
         received_value = atoi(buffer);
-        printf("Received integer value: %d\n", received_value);
+        printf("Received integer value: %d \n", received_value);
         angleConsigne =  received_value;
         ecart=received_value-angle;
 		if(ecart<=2500){
@@ -638,7 +638,7 @@ void* rtSoftTimerThread(void* arg) {
 		//std::cout << "INC " << INC << std::endl;
 		pthread_mutex_unlock(&mutexINC);
 		//!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-		// TODO expliquer pourquoi CLOCK_MONOTONIC_RAW est l'option de clock la + adaptée
+		// TODO expliquer pourquoi CLOCK_MONOTONIC_RAW est l'option de clock la + adaptéef
 		digitalWrite(dbgPin, HIGH);  // pour mesure le temps approx de ce call OS lui-même
 		clock_gettime(CLOCK_MONOTONIC_RAW, &iterationStartTime);
 		digitalWrite(dbgPin, LOW);
@@ -763,7 +763,7 @@ void* rtSoftTimerThreadCorrecteur(void* arg) {
 		ecart=angleConsigne-angleCorrecteur;
 
 		int Erreur=0;
-		if((sortie>500)&&(ecart==ecartPrecedent)){
+		if((sortie>100)&&(ecart==ecartPrecedent)){
 			Erreur=1;
 		}
 		switch (Erreur) {
@@ -778,7 +778,8 @@ void* rtSoftTimerThreadCorrecteur(void* arg) {
 				//Erreur = 1000;
 				PWM(0);
 				compteurErreur=0;
-				fprintf(stderr,"Erreur détectée, moteur arrêté, angle actuel : %f",angleCorrecteur);
+				fprintf(stderr,"Erreur détectée, moteur arrêté, angle actuel : %d\n",angleCorrecteur);
+
 				std::cout << "angleCorrecteur "<< angleCorrecteur  <<std::endl;
 				std::cout << "compteurErreur "<< compteurErreur  <<std::endl;
 				return NULL;
