@@ -141,36 +141,24 @@ void generalSignalHandler(int);
 void terminerProgramme();
 // Création et initialisation de la structure POSIX
 void generalSignalHandler(int signal)
-
 {
-
- if (signal == SIGTERM)
-
- {
-
- std::cout << std::endl << "Exécution de terminerProgramme() en cours..." << std::endl;
-
- terminerProgramme();
-
- std::cout << "Fin." << std::endl;
-
- exit(0);
-
- }
-
- else
-
- std::cerr << "Signal non-géré" << std::endl;
-
+    if (signal == SIGTERM)
+    {
+        std::cout << std::endl << "Exécution de terminerProgramme() en cours..." << std::endl;
+        terminerProgramme();
+        std::cout << "Fin." << std::endl;
+        exit(0);
+    }
+    else
+    std::cerr << "Signal non-géré" << std::endl;
 }
-
 
 // Activation des destructions__________________________________________________
 void terminerProgramme()
 {
-free(semDemarrage);
-close(client_socket);
-std::cout << "terminerProgramme." << std::endl;
+    free(semDemarrage);
+    close(client_socket);
+    std::cout << "terminerProgramme." << std::endl;
 }
 
 
