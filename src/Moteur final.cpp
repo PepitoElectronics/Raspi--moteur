@@ -789,126 +789,126 @@ void* rtSoftTimerThreadCorrecteur(void* arg) {
 
     int variableBoucle=0;
     while (continueTimer) {
-    variableBoucle++;
-    // inc !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    pthread_mutex_lock(&mutexINC);
-    INC=(INC+1)%(ratioTemps+1);
-    //std::cout << "INC " << INC << std::endl;
-    pthread_mutex_unlock(&mutexINC);
-    //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    // TODO expliquer pourquoi CLOCK_MONOTONIC_RAW est l'option de clock la + adaptée
-    digitalWrite(dbgPin, HIGH);  // pour mesure le temps approx de ce call OS lui-même
-    clock_gettime(CLOCK_MONOTONIC_RAW, &iterationStartTime);
-    digitalWrite(dbgPin, LOW);
+        variableBoucle++;
+        // inc !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+        pthread_mutex_lock(&mutexINC);
+        INC=(INC+1)%(ratioTemps+1);
+        //std::cout << "INC " << INC << std::endl;
+        pthread_mutex_unlock(&mutexINC);
+        //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+        // TODO expliquer pourquoi CLOCK_MONOTONIC_RAW est l'option de clock la + adaptée
+        digitalWrite(dbgPin, HIGH);  // pour mesure le temps approx de ce call OS lui-même
+        clock_gettime(CLOCK_MONOTONIC_RAW, &iterationStartTime);
+        digitalWrite(dbgPin, LOW);
 
-    // TODO doc: something can be done here
-    /************************ Code correcteur PID perso ******************************/
-    pthread_mutex_lock(&mutexAngle);
-    int angleCorrecteur=angle;
-    pthread_mutex_unlock(&mutexAngle);
+        // TODO doc: something can be done here
+        /************************ Code correcteur PID perso ******************************/
+        pthread_mutex_lock(&mutexAngle);
+        int angleCorrecteur=angle;
+        pthread_mutex_unlock(&mutexAngle);
 
-    ecart=angleConsigne-angleCorrecteur;
+        ecart=angleConsigne-angleCorrecteur;
 
-    int Erreur=0;
-    if((sortie>300)&&(abs(ecart)>10)&&(ecart==ecartPrecedent)){
-        Erreur=1;
-        if(ecart != ecartDixPrecedent){
-            compteurErreur=0;
-        }
-    std::cout << "Erreur détectée !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"  <<std::endl;
-    }
-    switch (Erreur) {
-        case 1: // Rotor bloqué
-            //PWM(0);
-            //perror("Erreur Rotor bloqué");
-            //std::cout << "Erreur Rotor bloqué "<<std::endl;
-            //return NULL;
-            compteurErreur++;
-            Erreur=0;
-            std::cout << "compteurErreur "<< compteurErreur  <<std::endl;
-            if(compteurErreur==(((int)PERIODE_ECHEC)/((int)PERIODE_CORRECTEUR))){
-            //Erreur = 1000;
-            PWM(0);
-            compteurErreur=0;
-            fprintf(stderr,"Erreur détectée, moteur arrêté, angle actuel : %d\n",angleCorrecteur);
-
-            std::cout << "angleCorrecteur "<< angleCorrecteur  <<std::endl;
-            std::cout << "compteurErreur "<< compteurErreur  <<std::endl;
-            return NULL;
+        int Erreur=0;
+        if((sortie>300)&&(abs(ecart)>10)&&(ecart==ecartPrecedent)){
+            Erreur=1;
+            if(ecart != ecartDixPrecedent){
+                compteurErreur=0;
             }
-            break;
-        case 2: // Relais éteint
-            PWM(0);
-            std::cout << "Relais éteint "<<std::endl;
-            return NULL;
+        std::cout << "Erreur détectée !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"  <<std::endl;
         }
-    std::cout << "DiviseurKp : "<<DiviseurKp<<std::endl;
+        switch (Erreur) {
+            case 1: // Rotor bloqué
+                //PWM(0);
+                //perror("Erreur Rotor bloqué");
+                //std::cout << "Erreur Rotor bloqué "<<std::endl;
+                //return NULL;
+                compteurErreur++;
+                Erreur=0;
+                std::cout << "compteurErreur "<< compteurErreur  <<std::endl;
+                if(compteurErreur==(((int)PERIODE_ECHEC)/((int)PERIODE_CORRECTEUR))){
+                    //Erreur = 1000;
+                    PWM(0);
+                    compteurErreur=0;
+                    fprintf(stderr,"Erreur détectée, moteur arrêté, angle actuel : %d\n",angleCorrecteur);
 
-    int PWM_FCT_Ecart = (int)((abs(ecart)/360)*1024);
-    integral=(Ki*Te*ecart)+(FacteurOubli*integral);
-    /*
-    if(ecart<100){
-    integral-=10*Ki*Te*ecart;
-    }
-    else{
-    integral+=Ki*Te*ecart;
-    }
-    */
-    std::cout << "integral : "<<integral<<std::endl;
-    std::cout << "ecart : "<<ecart<<std::endl;
+                    std::cout << "angleCorrecteur "<< angleCorrecteur  <<std::endl;
+                    std::cout << "compteurErreur "<< compteurErreur  <<std::endl;
+                    return NULL;
+                }
+                break;
+            case 2: // Relais éteint
+                PWM(0);
+                std::cout << "Relais éteint "<<std::endl;
+                return NULL;
+            }
+        std::cout << "DiviseurKp : "<<DiviseurKp<<std::endl;
 
-    /*int integralLimite=500000;
-    if(integral>=integralLimite){
-    integral=integralLimite;
-    //integral-=Ki*Te*ecart;
-    }*/
+        int PWM_FCT_Ecart = (int)((abs(ecart)/360)*1024);
+        integral=(Ki*Te*ecart)+(FacteurOubli*integral);
+        /*
+        if(ecart<100){
+        integral-=10*Ki*Te*ecart;
+        }
+        else{
+        integral+=Ki*Te*ecart;
+        }
+        */
+        std::cout << "integral : "<<integral<<std::endl;
+        std::cout << "ecart : "<<ecart<<std::endl;
 
-    sortie = abs(Kp*(ecart + integral + ((Kd/Te) * (ecart-ecartPrecedent))));
-    std::cout << "sortie : "<<sortie<<std::endl;
-    //std::cout << "sortie : "<<sortie<<std::endl;
-    //sortie = Kp*(proportionnel + integral);
+        /*int integralLimite=500000;
+        if(integral>=integralLimite){
+        integral=integralLimite;
+        //integral-=Ki*Te*ecart;
+        }*/
 
-    if(ecart>0){
-        initSR(1);
-    } 
-    else if(ecart<0){
-        initSR(0);
-    }
-    //PWM(sortie*ecart);
-    //std::cout << "PWM : "<<PWM_FCT_Ecart<<std::endl;
+        sortie = abs(Kp*(ecart + integral + ((Kd/Te) * (ecart-ecartPrecedent))));
+        std::cout << "sortie : "<<sortie<<std::endl;
+        //std::cout << "sortie : "<<sortie<<std::endl;
+        //sortie = Kp*(proportionnel + integral);
 
-    PWM(sortie);
-    /*
-    if(abs(ecart)>10){
-    PWM(sortie);
-    } else {
-    PWM(0);
-    }
-    */
-    ecartPrecedent = ecart;
-    if(variableBoucle%5==0){
-        ecartDixPrecedent = ecart;
-    }
-    //usleep((int)PERIODE_CORRECTEUR);
-    /********************************************************************/
+        if(ecart>0){
+            initSR(1);
+        } 
+        else if(ecart<0){
+            initSR(0);
+        }
+        //PWM(sortie*ecart);
+        //std::cout << "PWM : "<<PWM_FCT_Ecart<<std::endl;
 
-    // Calcul de l'instant auquel on aimerait se réveiller, pour enchaîner directement
-    // sur la boucle suivante. Attention à gérer correctement la structure timespec,
-    // surtout les overflows de nanosecondes
-    if (iterationStartTime.tv_nsec + timerPeriod_ns >= 1000000000L) {  // Si on passe à la seconde suivante
-        sleepEndTime.tv_nsec = iterationStartTime.tv_nsec + timerPeriod_ns - 1000000000L;
-        sleepEndTime.tv_sec = iterationStartTime.tv_sec + 1;
-    }
-    else {  // Sinon, cas le + simple: on ajoute juste les nanosecondes à attendre
-        sleepEndTime.tv_nsec = iterationStartTime.tv_nsec + timerPeriod_ns;
-        sleepEndTime.tv_sec = iterationStartTime.tv_sec;
-    }
+        PWM(sortie);
+        /*
+        if(abs(ecart)>10){
+        PWM(sortie);
+        } else {
+        PWM(0);
+        }
+        */
+        ecartPrecedent = ecart;
+        if(variableBoucle%5==0){
+            ecartDixPrecedent = ecart;
+        }
+        //usleep((int)PERIODE_CORRECTEUR);
+        /********************************************************************/
 
-    // TODO sleep_until, 2 modes (compensated or not)
-    if (USE_COMPENSATED_SLEEP)
-        compensatedSleepUntil(&sleepEndTime);
-    else
-        naiveSleepUntil(&sleepEndTime);
+        // Calcul de l'instant auquel on aimerait se réveiller, pour enchaîner directement
+        // sur la boucle suivante. Attention à gérer correctement la structure timespec,
+        // surtout les overflows de nanosecondes
+        if (iterationStartTime.tv_nsec + timerPeriod_ns >= 1000000000L) {  // Si on passe à la seconde suivante
+            sleepEndTime.tv_nsec = iterationStartTime.tv_nsec + timerPeriod_ns - 1000000000L;
+            sleepEndTime.tv_sec = iterationStartTime.tv_sec + 1;
+        }
+        else {  // Sinon, cas le + simple: on ajoute juste les nanosecondes à attendre
+            sleepEndTime.tv_nsec = iterationStartTime.tv_nsec + timerPeriod_ns;
+            sleepEndTime.tv_sec = iterationStartTime.tv_sec;
+        }
+
+        // TODO sleep_until, 2 modes (compensated or not)
+        if (USE_COMPENSATED_SLEEP)
+            compensatedSleepUntil(&sleepEndTime);
+        else
+            naiveSleepUntil(&sleepEndTime);
     }
     // Fin du thread
     digitalWrite(clockPin, LOW);
