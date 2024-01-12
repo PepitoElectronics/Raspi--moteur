@@ -6,22 +6,22 @@
 //============================================================================
 
 /**************************** Bibliothèques ****************************************/
-#include <iostream>      // Entrée/sortie standard
-#include "unistd.h"      // API POSIX pour le système d'exploitation
-#include <pthread.h>     // Threads POSIX
-#include <time.h>        // Fonctions liées au temps
-#include "wiringPi.h"    // Bibliothèque WiringPi pour les GPIO sur Raspberry Pi
-#include <math.h>        // Fonctions mathématiques
-#include <stdio.h>       // Opérations d'entrée/sortie standard
-#include <sys/socket.h>  // Programmation socket
-#include <stdlib.h>      // Bibliothèque standard
-#include <string.h>      // Fonctions de manipulation de chaînes de caractères
-#include <netinet/in.h>  // Famille d'adresses Internet
-#include <semaphore.h>   // Synchronisation avec des sémaphores
-#include <signal.h>      // Gestion des signaux (pour la fermeture du programme)
+#include <iostream>     // Entrée/sortie standard
+#include "unistd.h"     // API POSIX pour le système d'exploitation
+#include <pthread.h>    // Threads POSIX
+#include <time.h>       // Fonctions liées au temps
+#include "wiringPi.h"   // Bibliothèque WiringPi pour les GPIO sur Raspberry Pi
+#include <math.h>       // Fonctions mathématiques
+#include <stdio.h>      // Opérations d'entrée/sortie standard
+#include <sys/socket.h> // Programmation socket
+#include <stdlib.h>     // Bibliothèque standard
+#include <string.h>     // Fonctions de manipulation de chaînes de caractères
+#include <netinet/in.h> // Famille d'adresses Internet
+#include <semaphore.h>  // Synchronisation avec des sémaphores
+#include <signal.h>     // Gestion des signaux (pour la fermeture du programme)
 // TCP
-#include <arpa/inet.h>   // Définitions pour les opérations Internet
-#include <errno.h>       // Définitions des numéros d'erreur
+#include <arpa/inet.h> // Définitions pour les opérations Internet
+#include <errno.h>     // Définitions des numéros d'erreur
 
 /**************************** Defines ****************************************/
 #define TIMER_RUN_TIME_S (5 * 60) // temps approx d'exécution du programme, en secondes
@@ -39,9 +39,9 @@
  * avec compensation:       500       479      638
  */
 // Taille max du buffer d'envoi pour la lisaison série
-#define nBitsAEnvoyer 20 
+#define nBitsAEnvoyer 20
 // Gain de départ pour appliquer la méthode de Ziegler-Nichols
-#define gain 6 
+#define gain 6
 // Définition du port à utiliser pour la communication
 #define PORT 1883
 // Taille du tampon (buffer) pour la communication
@@ -84,18 +84,18 @@ const int sr2Pin = 10;           // Numéro de broche WiringPi pour la broche li
 const int pinMasterRequest = 15; // Numéro de broche WiringPi pour la demande de maître
 
 /************** Variables du programme ******************/
-int consigne = 0; // Consigne initiale (hard-codée) en degré
-float DiviseurKp; // Facteur de division du kp
-float Kp; // Gain proportionnel du correcteur PID mixte
-float FacteurOubli = 0.9985; // Facteur utilisé pour permettre de vider la composante intégrale
-int messageRX[nBitsAEnvoyer]; // Contient les caractères envoyés dans la trame circulant sur la liaison série
-int angle = 0; // Contient le résultat envoyé sur la liaison série (angle équivalent)
-int anglePrecedent = 0; // Penultième angle reçu 
-int angleMax = 65535; // Limite maximale en angle pour le système
-int ecart; // valeur de l'écrat utilisé pour le PID
-int ecartPrecedent; // Penultième écart calculé 
-int ecartDixPrecedent;// Ancien écart calculé (10ème valeur précédente) 
-int angleConsigne = 0;// Anglme de consigne 
+int consigne = 0;                 // Consigne initiale (hard-codée) en degré
+float DiviseurKp;                 // Facteur de division du kp
+float Kp;                         // Gain proportionnel du correcteur PID mixte
+float FacteurOubli = 0.9985;      // Facteur utilisé pour permettre de vider la composante intégrale
+int messageRX[nBitsAEnvoyer];     // Contient les caractères envoyés dans la trame circulant sur la liaison série
+int angle = 0;                    // Contient le résultat envoyé sur la liaison série (angle équivalent)
+int anglePrecedent = 0;           // Penultième angle reçu
+int angleMax = 65535;             // Limite maximale en angle pour le système
+int ecart;                        // valeur de l'écrat utilisé pour le PID
+int ecartPrecedent;               // Penultième écart calculé
+int ecartDixPrecedent;            // Ancien écart calculé (10ème valeur précédente)
+int angleConsigne = 0;            // Anglme de consigne
 int server_socket, client_socket; // Socket pour la communication TCP/IP
 int utime = 600000;
 
@@ -112,20 +112,20 @@ sem_t *semDemarrageCom;
 int main()
 {
     // Gestion de SIGTERM
-// Déclaration d'une structure sigaction pour la gestion des signaux
-struct sigaction signalAction;
-// Initialisation du masque de signaux à ignorer pendant l'exécution du gestionnaire de signal
-sigemptyset(&signalAction.sa_mask);
-// Configuration des options de la struct sigaction
-signalAction.sa_flags = 0;
-// Attribution de la fonction de gestion des signaux (generalSignalHandler) à sa_handler
-signalAction.sa_handler = &generalSignalHandler;
-// Tentative d'intercepter le signal SIGTERM en utilisant la fonction sigaction
-if (sigaction(SIGTERM, &signalAction, NULL) == -1)
-{
-    // Affiche un message d'erreur si l'interception du signal échoue
-    std::cerr << "Impossible d'intercepter SIGTERM !" << std::endl;
-}
+    // Déclaration d'une structure sigaction pour la gestion des signaux
+    struct sigaction signalAction;
+    // Initialisation du masque de signaux à ignorer pendant l'exécution du gestionnaire de signal
+    sigemptyset(&signalAction.sa_mask);
+    // Configuration des options de la struct sigaction
+    signalAction.sa_flags = 0;
+    // Attribution de la fonction de gestion des signaux (generalSignalHandler) à sa_handler
+    signalAction.sa_handler = &generalSignalHandler;
+    // Tentative d'intercepter le signal SIGTERM en utilisant la fonction sigaction
+    if (sigaction(SIGTERM, &signalAction, NULL) == -1)
+    {
+        // Affiche un message d'erreur si l'interception du signal échoue
+        std::cerr << "Impossible d'intercepter SIGTERM !" << std::endl;
+    }
 
     // Allocation dynamique de la mémoire pour les sémaphores
     sem_t *semDemarrage = (sem_t *)malloc(sizeof(sem_t));
@@ -148,11 +148,11 @@ if (sigaction(SIGTERM, &signalAction, NULL) == -1)
     pthread_attr_init(&threadAttributes);
     pthread_attr_setdetachstate(&threadAttributes, PTHREAD_CREATE_JOINABLE);
 
-    pthread_create(&rtThreadTid, &threadAttributes, &rtSoftTimerThread, 0);// Thread du rtSoftTimerThread
-    pthread_create(&clockThreadTid, &threadAttributes, &clockTimer, 0);// Thread de la clock avec l'ordinateur
+    pthread_create(&rtThreadTid, &threadAttributes, &rtSoftTimerThread, 0);                   // Thread du rtSoftTimerThread
+    pthread_create(&clockThreadTid, &threadAttributes, &clockTimer, 0);                       // Thread de la clock avec l'ordinateur
     pthread_create(&correcteurThreadTid, &threadAttributes, &rtSoftTimerThreadCorrecteur, 0); // Thread du correcteur
-    pthread_create(&TCPTid, &threadAttributes, &comTCP, 0); // Thread de la communication TCP avec l'ordinateur
-    pthread_create(&TXTid, &threadAttributes, &TX, 0);// Thread de la communication série avec l'ordinateur
+    pthread_create(&TCPTid, &threadAttributes, &comTCP, 0);                                   // Thread de la communication TCP avec l'ordinateur
+    pthread_create(&TXTid, &threadAttributes, &TX, 0);                                        // Thread de la communication série avec l'ordinateur
 
     pthread_attr_destroy(&threadAttributes);
 
@@ -214,7 +214,6 @@ void initSR(int sens)
     }
 }
 
-
 // Fonction pour configurer la modulation de largeur d'impulsion (PWM)
 // en ajustant la fréquence et le rapport cyclique en fonction du paramètre rc
 void PWM(int rc)
@@ -222,13 +221,12 @@ void PWM(int rc)
     // Définir le mode PWM sur mark-space (MS) pour une meilleure précision
     pwmSetMode(PWM_MODE_MS);
     // Définir la fréquence de PWM (50 kHz dans cet exemple)
-    pwmSetClock(384);  // La fréquence de base de 19.2 MHz divisée par 384 donne 50 kHz
+    pwmSetClock(384); // La fréquence de base de 19.2 MHz divisée par 384 donne 50 kHz
     // Définir la plage de valeurs pour le rapport cyclique (de 0 à 1023)
     pwmSetRange(1024);
     // Définir le rapport cyclique initial en fonction du paramètre rc
     pwmWrite(pwmPin, rc);
 }
-
 
 // Fonction pour initialiser les relais
 void initRelais()
@@ -265,10 +263,10 @@ void initTX()
 }
 Voici une explication détaillée des commentaires pour les deux fonctions exp2 et exptt :
 
-cpp
+    cpp
 
-// Fonction pour calculer 2^exponent
-int exp2(int exponent)
+    // Fonction pour calculer 2^exponent
+    int exp2(int exponent)
 {
     // Initialisation de la base à 2 et du résultat à 1
     int base = 2;
@@ -529,7 +527,6 @@ void *ChangeStatePin(void *arg)
     return NULL;
 }
 
-
 // Fonction exécutée par le thread du timer logiciel temps réel
 void *rtSoftTimerThread(void *arg)
 {
@@ -629,21 +626,21 @@ void *rtSoftTimerThreadCorrecteur(void *arg)
     sem_wait(semDemarrage);
 
     // Étape 2 : Ziegler-Nichols
-    float Te = 0.004; //Période d'échantillonnage du système
-    float Tc = 0.226; // Temps critique de la méthode de Ziegler-Nichols
+    float Te = 0.004;     // Période d'échantillonnage du système
+    float Tc = 0.226;     // Temps critique de la méthode de Ziegler-Nichols
     float Ti = 0.83 * Tc; // Temps d'intégration (Gestion des erreurs à long terme)
-    float Td = (Tc / 8); // Temps de dérivation (Anticipation des erreurs futures)
-    float Ki = 1 / Ti; //Gain intégral 
-    float Kd = 1 / Td; //Gain dérivé
+    float Td = (Tc / 8);  // Temps de dérivation (Anticipation des erreurs futures)
+    float Ki = 1 / Ti;    // Gain intégral
+    float Kd = 1 / Td;    // Gain dérivé
 
-float accumulIntegral = 0; // Variable pour stocker l'accumulation des erreurs intégrales
-float proportionnel = 0;   // Variable pour stocker la contribution proportionnelle du PID
-float derive = 0;         // Variable pour stocker la contribution dérivée du PID
-float integral = 0;       // Variable pour stocker la contribution intégrale du PID
-float sortie = 0;         // Variable pour stocker la sortie totale du PID
-float DeltaT = 0.004;      // Temps d'échantillonnage du PID (période d'échantillonnage)
-int compteurErreur = 0;    // Compteur utilisé pour détecter des conditions d'erreur spécifiques
-int variableBoucle = 0;    // Variable de comptage de boucles 
+    float accumulIntegral = 0; // Variable pour stocker l'accumulation des erreurs intégrales
+    float proportionnel = 0;   // Variable pour stocker la contribution proportionnelle du PID
+    float derive = 0;          // Variable pour stocker la contribution dérivée du PID
+    float integral = 0;        // Variable pour stocker la contribution intégrale du PID
+    float sortie = 0;          // Variable pour stocker la sortie totale du PID
+    float DeltaT = 0.004;      // Temps d'échantillonnage du PID (période d'échantillonnage)
+    int compteurErreur = 0;    // Compteur utilisé pour détecter des conditions d'erreur spécifiques
+    int variableBoucle = 0;    // Variable de comptage de boucles
 
     Kp = 0.3;
     angleConsigne = consigne;
@@ -775,7 +772,6 @@ int variableBoucle = 0;    // Variable de comptage de boucles
     // Retourne NULL (non utilisé dans le contexte pthread)
     return NULL;
 }
-
 
 void *clockTimer(void *arg)
 {
