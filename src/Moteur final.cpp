@@ -1,6 +1,6 @@
 //============================================================================
 // Name        : Moteur.cpp
-// Author      : Oli - Juan
+// Author      : Olivier Van Roost - Juan Alvarez Lopez
 // Version     :
 // Copyright   : Your copyright notice
 //============================================================================
