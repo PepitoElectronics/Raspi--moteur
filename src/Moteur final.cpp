@@ -5,22 +5,23 @@
 // Copyright   : Your copyright notice
 //============================================================================
 
-#include <iostream>
-#include "unistd.h"
-#include <pthread.h>
-#include <time.h>
-#include "wiringPi.h"
-#include <math.h>
-#include <stdio.h>
-#include <sys/socket.h>
-#include <stdlib.h>
-#include <string.h>
-#include <netinet/in.h>
-#include <semaphore.h>
-#include <signal.h> // gestion des signaux (pour nous : fermeture du programme)
+/**************************** Bibliothèques ****************************************/
+#include <iostream>      // Entrée/sortie standard
+#include "unistd.h"      // API POSIX pour le système d'exploitation
+#include <pthread.h>     // Threads POSIX
+#include <time.h>        // Fonctions liées au temps
+#include "wiringPi.h"    // Bibliothèque WiringPi pour les GPIO sur Raspberry Pi
+#include <math.h>        // Fonctions mathématiques
+#include <stdio.h>       // Opérations d'entrée/sortie standard
+#include <sys/socket.h>  // Programmation socket
+#include <stdlib.h>      // Bibliothèque standard
+#include <string.h>      // Fonctions de manipulation de chaînes de caractères
+#include <netinet/in.h>  // Famille d'adresses Internet
+#include <semaphore.h>   // Synchronisation avec des sémaphores
+#include <signal.h>      // Gestion des signaux (pour la fermeture du programme)
 // TCP
-#include <arpa/inet.h>
-#include <errno.h>
+#include <arpa/inet.h>   // Définitions pour les opérations Internet
+#include <errno.h>       // Définitions des numéros d'erreur
 
 /**************************** Defines ****************************************/
 #define TIMER_RUN_TIME_S (5 * 60) // temps approx d'exécution du programme, en secondes
@@ -37,13 +38,18 @@
  * sans compensation:       526       481      708
  * avec compensation:       500       479      638
  */
-#define nBitsAEnvoyer 20 // Taille max du buffer d'envoi
-#define gain 6
-/**************** TCP *******************************/
+// Taille max du buffer d'envoi pour la lisaison série
+#define nBitsAEnvoyer 20 
+// Gain de départ pour appliquer la méthode de Ziegler-Nichols
+#define gain 6 
+// Définition du port à utiliser pour la communication
 #define PORT 1883
+// Taille du tampon (buffer) pour la communication
 #define BUFFER_SIZE 32
-#define PERIODE_CORRECTEUR 4000 // us
-#define PERIODE_ECHEC 5000000   // us
+// Période propre au correcteur en microsecondes (us)
+#define PERIODE_CORRECTEUR 4000
+// Période maximale autorisée avec persistance d'erreur en microsecondes (us)
+#define PERIODE_ECHEC 5000000
 /****************************  PROTOTYPES  *********************************************/
 void *rtSoftTimerThread(void *arg);
 void *rtSoftTimerThreadCorrecteur(void *arg);
@@ -65,182 +71,180 @@ int exp2(int exponent);
 int exptt(int base, int exponent);
 void generalSignalHandler(int);
 void terminerProgramme();
-/******************** Wiring pi pinout ******************************/
-const int clockPin = 0; // numérotation wiringPi. On aura un signal d'horloge:
-// chaque front montant ou descendant correspond à un tick du timer
-const int dbgPin = 1; // numérotation wiringPi
-const int lgcRelPin = 11;
-const int pwrRelPin = 31;
-const int RXPin = 13;
-const int TXPin = 14;
-const int pwmPin = 26;
-const int sr1Pin = 6;
-const int sr2Pin = 10;
-const int pinMasterRequest = 15;
-/*********************************************************************/
+/******************** Câblage WiringPi ******************************/
+const int clockPin = 0;          // Numéro de broche WiringPi pour le signal d'horloge
+const int dbgPin = 1;            // Numéro de broche WiringPi pour le débogage
+const int lgcRelPin = 11;        // Numéro de broche WiringPi pour le relais logique
+const int pwrRelPin = 31;        // Numéro de broche WiringPi pour le relais d'alimentation
+const int RXPin = 13;            // Numéro de broche WiringPi pour la broche de réception (RX)
+const int TXPin = 14;            // Numéro de broche WiringPi pour la broche de transmission (TX)
+const int pwmPin = 26;           // Numéro de broche WiringPi pour la broche PWM
+const int sr1Pin = 6;            // Numéro de broche WiringPi pour la broche liée au sens de rotation 1
+const int sr2Pin = 10;           // Numéro de broche WiringPi pour la broche liée au sens de rotation 2
+const int pinMasterRequest = 15; // Numéro de broche WiringPi pour la demande de maître
 
-/************** Var programme ******************/
-int consigne = 0; // consigne initiale hard codée
+/************** Variables du programme ******************/
+int consigne = 0; // Consigne initiale (hard-codée) en degré
 float DiviseurKp; // Facteur de division du kp
-float Kp;
-float FacteurOubli = 0.9985; // FacteurOubli=0.9985;
-int INC = 0;
-int ratioTemps = 8;
-int messageRX[nBitsAEnvoyer];
-int angle = 0;
-int anglePrecedent = 0;
-int angleMax = 65535;
-int ecart;
-int ecartPrecedent;
-int ecartDixPrecedent;
-int angleConsigne = 0;
-int server_socket, client_socket;
+float Kp; // Gain proportionnel du correcteur PID mixte
+float FacteurOubli = 0.9985; // Facteur utilisé pour permettre de vider la composante intégrale
+int messageRX[nBitsAEnvoyer]; // Contient les caractères envoyés dans la trame circulant sur la liaison série
+int angle = 0; // Contient le résultat envoyé sur la liaison série (angle équivalent)
+int anglePrecedent = 0; // Penultième angle reçu 
+int angleMax = 65535; // Limite maximale en angle pour le système
+int ecart; // valeur de l'écrat utilisé pour le PID
+int ecartPrecedent; // Penultième écart calculé 
+int ecartDixPrecedent;// Ancien écart calculé (10ème valeur précédente) 
+int angleConsigne = 0;// Anglme de consigne 
+int server_socket, client_socket; // Socket pour la communication TCP/IP
 int utime = 600000;
 
+// Mutex de protection des variables partagées
 pthread_mutex_t mutexAngle;
 pthread_mutex_t mutexAngleConsigne;
 pthread_mutex_t mutexINC;
 
+// Sémaphores de synchronisation des threads
 sem_t *semDemarrage;
 sem_t *semDemarrageCom;
-/***********************************************************************/
-
+/************************** Main *********************************/
+// Fonction principale
 int main()
 {
+    // Gestion de SIGTERM
+// Déclaration d'une structure sigaction pour la gestion des signaux
+struct sigaction signalAction;
+// Initialisation du masque de signaux à ignorer pendant l'exécution du gestionnaire de signal
+sigemptyset(&signalAction.sa_mask);
+// Configuration des options de la struct sigaction
+signalAction.sa_flags = 0;
+// Attribution de la fonction de gestion des signaux (generalSignalHandler) à sa_handler
+signalAction.sa_handler = &generalSignalHandler;
+// Tentative d'intercepter le signal SIGTERM en utilisant la fonction sigaction
+if (sigaction(SIGTERM, &signalAction, NULL) == -1)
+{
+    // Affiche un message d'erreur si l'interception du signal échoue
+    std::cerr << "Impossible d'intercepter SIGTERM !" << std::endl;
+}
 
-    /*************** GESTION SIGTERM ************************/
-    struct sigaction signalAction;
-    sigemptyset(&signalAction.sa_mask);
-    signalAction.sa_flags = 0;
-    // Fonction appelée lors de la signalisation
-    signalAction.sa_handler = &generalSignalHandler;
-    // Interception de SIGTERM uniquement
-    if (sigaction(SIGTERM, &signalAction, NULL) == -1) // si erreur
-        std::cerr << "Impossible d'intercepter SIGTERM !" << std::endl;
+    // Allocation dynamique de la mémoire pour les sémaphores
+    sem_t *semDemarrage = (sem_t *)malloc(sizeof(sem_t));
+    sem_t *semDemarrageCom = (sem_t *)malloc(sizeof(sem_t));
 
-    /***********************************************************/
-
-    // Allocation dynamique de la mémoire pour le sémaphore
-    semDemarrage = (sem_t *)malloc(sizeof(sem_t));
-    semDemarrageCom = (sem_t *)malloc(sizeof(sem_t));
-    // Initialisation du sémaphore avec la valeur initiale 1
     sem_init(semDemarrage, 0, 0);
     sem_init(semDemarrageCom, 0, 0);
 
-    // Initialiser WiringPi
+    // Initialisation de WiringPi
     wiringPiSetup();
     pinMode(pwmPin, PWM_OUTPUT);
 
     std::cout << "Real-Time software Timer on Raspberry Pi 3" << std::endl;
-    char hostname[100];
-    gethostname(hostname, 100);
-    std::cout << "Machine name: " << hostname << std::endl;
 
-    // TID
-    pthread_t rtThreadTid;
-    pthread_t clockThreadTid;
-    pthread_t correcteurThreadTid;
-    pthread_t TCPTid;
-    pthread_t TXTid;
-    // Configuration et lancement du thread
+    // TIDs pour les threads
+    pthread_t rtThreadTid, clockThreadTid, correcteurThreadTid, TCPTid, TXTid;
+
+    // Configuration et lancement des threads
     pthread_attr_t threadAttributes;
     pthread_attr_init(&threadAttributes);
     pthread_attr_setdetachstate(&threadAttributes, PTHREAD_CREATE_JOINABLE);
-    pthread_create(&rtThreadTid, &threadAttributes, &rtSoftTimerThread, 0);
+
+    pthread_create(&rtThreadTid, &threadAttributes, &rtSoftTimerThread, 0);// Thread du rtSoftTimerThread
+    pthread_create(&clockThreadTid, &threadAttributes, &clockTimer, 0);// Thread de la clock avec l'ordinateur
+    pthread_create(&correcteurThreadTid, &threadAttributes, &rtSoftTimerThreadCorrecteur, 0); // Thread du correcteur
+    pthread_create(&TCPTid, &threadAttributes, &comTCP, 0); // Thread de la communication TCP avec l'ordinateur
+    pthread_create(&TXTid, &threadAttributes, &TX, 0);// Thread de la communication série avec l'ordinateur
+
     pthread_attr_destroy(&threadAttributes);
-    ////////////////////////////////////////
-    pthread_attr_t threadClock;
-    pthread_attr_init(&threadClock);
-    pthread_attr_setdetachstate(&threadClock, PTHREAD_CREATE_JOINABLE);
-    pthread_create(&clockThreadTid, &threadClock, &clockTimer, 0);
-    pthread_attr_destroy(&threadClock);
-    ////////////////////////////////////////
-    ////////////////////////////////////////
-    pthread_attr_t threadCorrecteur;
-    pthread_attr_init(&threadCorrecteur);
-    pthread_attr_setdetachstate(&threadCorrecteur, PTHREAD_CREATE_JOINABLE);
-    pthread_create(&correcteurThreadTid, &threadCorrecteur, &rtSoftTimerThreadCorrecteur, 0);
-    // pthread_create(&correcteurThreadTid, &threadCorrecteur, &Correcteur, 0);
-    pthread_attr_destroy(&threadCorrecteur);
-    ////////////////////////////////////////
-    ////////////////////////////////////////
-    pthread_attr_t threadComTCP;
-    pthread_attr_init(&threadComTCP);
-    pthread_attr_setdetachstate(&threadComTCP, PTHREAD_CREATE_JOINABLE);
-    pthread_create(&TCPTid, &threadComTCP, &comTCP, 0);
-    pthread_attr_destroy(&threadComTCP);
-    ////////////////////////////////////////
-    ////////////////////////////////////////
-    pthread_attr_t threadTX;
-    pthread_attr_init(&threadTX);
-    pthread_attr_setdetachstate(&threadTX, PTHREAD_CREATE_JOINABLE);
-    /*struct sched_param paramstx;
-    paramstx.sched_priority = 50;
-    pthread_setschedparam(TXTid, SCHED_FIFO, &paramstx);*/
-    pthread_create(&TXTid, &threadTX, &TX, 0);
-    pthread_attr_destroy(&threadTX);
-    ////////////////////////////////////////
+
+    // Autres initialisations
     initRX();
     initTX();
 
     pthread_t thread_MasterRequest;
     pthread_create(&thread_MasterRequest, NULL, &ChangeStatePin, NULL);
 
-    // Fonction ajoutée
-    // initSR(0);
-    PWM(0);
-    initRelais();
-    // sleep(1);
-    // finRelais(0);
+    // Plus de configurations/initiations...
+
+    // Poste les sémaphores pour démarrer les threads
     sem_post(semDemarrage);
     sem_post(semDemarrageCom);
+
+    // Boucle principale
     while (1)
     {
         usleep(60);
-        // TXnaif();
     }
-    // finRelais();
-    //  Attente la fin du threads - join
+
+    // Attente la fin des threads avec join
     pthread_join(rtThreadTid, 0);
+
+    // Nettoyage des ressources
+    free(semDemarrage);
+    free(semDemarrageCom);
+
     return 0;
 }
 
+// Fonction pour initialiser les broches de décalage de registre
+// en fonction du sens spécifié (0 pour un sens, 1 pour l'autre sens)
 void initSR(int sens)
 {
+    // Vérifie le sens spécifié
     if (sens == 0)
     {
+        // Configuration de la broche sr1Pin en mode sortie
         pinMode(sr1Pin, OUTPUT);
+        // Positionnement de la broche sr1Pin à un niveau logique élevé (HIGH)
         digitalWrite(sr1Pin, HIGH);
+        // Configuration de la broche sr2Pin en mode sortie
         pinMode(sr2Pin, OUTPUT);
+        // Positionnement de la broche sr2Pin à un niveau logique bas (LOW)
         digitalWrite(sr2Pin, LOW);
     }
     else
     {
+        // Configuration de la broche sr2Pin en mode sortie
         pinMode(sr2Pin, OUTPUT);
+        // Positionnement de la broche sr2Pin à un niveau logique élevé (HIGH)
         digitalWrite(sr2Pin, HIGH);
+        // Configuration de la broche sr1Pin en mode sortie
         pinMode(sr1Pin, OUTPUT);
+        // Positionnement de la broche sr1Pin à un niveau logique bas (LOW)
         digitalWrite(sr1Pin, LOW);
     }
 }
 
+
+// Fonction pour configurer la modulation de largeur d'impulsion (PWM)
+// en ajustant la fréquence et le rapport cyclique en fonction du paramètre rc
 void PWM(int rc)
 {
-    // Définir la fréquence PWM
+    // Définir le mode PWM sur mark-space (MS) pour une meilleure précision
     pwmSetMode(PWM_MODE_MS);
-    pwmSetClock(384);  // Fréquence de base de 19.2 MHz divisée par 384 donne 50 kHz
-    pwmSetRange(1024); // Plage de valeurs pour le rapport cyclique (de 0 à 1023)
-    // Définir le rapport cyclique initial
+    // Définir la fréquence de PWM (50 kHz dans cet exemple)
+    pwmSetClock(384);  // La fréquence de base de 19.2 MHz divisée par 384 donne 50 kHz
+    // Définir la plage de valeurs pour le rapport cyclique (de 0 à 1023)
+    pwmSetRange(1024);
+    // Définir le rapport cyclique initial en fonction du paramètre rc
     pwmWrite(pwmPin, rc);
 }
 
+
+// Fonction pour initialiser les relais
 void initRelais()
 {
+    // Configuration des broches des relais en mode sortie
     pinMode(lgcRelPin, OUTPUT);
     pinMode(pwrRelPin, OUTPUT);
+    // Pause d'une seconde pour permettre aux relais de s'initialiser
     sleep(1);
+    // Activation du relais logique (mise à un)
     digitalWrite(lgcRelPin, HIGH);
+    // Pause d'une seconde pour permettre aux relais de s'initialiser
     sleep(1);
+    // Activation du relais d'alimentation (mise à un)
     digitalWrite(pwrRelPin, HIGH);
+    // Affichage d'un message indiquant que l'initialisation des relais est terminée
     std::cout << "Relais OK " << std::endl;
 }
 
@@ -652,11 +656,7 @@ void *rtSoftTimerThread(void *arg)
     bool continueTimer = true;
     while (continueTimer)
     {
-        // inc !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-        pthread_mutex_lock(&mutexINC);
-        INC = (INC + 1) % (ratioTemps + 1);
-        // std::cout << "INC " << INC << std::endl;
-        pthread_mutex_unlock(&mutexINC);
+
         //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
         // TODO expliquer pourquoi CLOCK_MONOTONIC_RAW est l'option de clock la + adaptéef
         digitalWrite(dbgPin, HIGH); // pour mesure le temps approx de ce call OS lui-même
@@ -765,12 +765,6 @@ void *rtSoftTimerThreadCorrecteur(void *arg)
     while (continueTimer)
     {
         variableBoucle++;
-        // inc !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-        pthread_mutex_lock(&mutexINC);
-        INC = (INC + 1) % (ratioTemps + 1);
-        // std::cout << "INC " << INC << std::endl;
-        pthread_mutex_unlock(&mutexINC);
-        //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
         // TODO expliquer pourquoi CLOCK_MONOTONIC_RAW est l'option de clock la + adaptée
         digitalWrite(dbgPin, HIGH); // pour mesure le temps approx de ce call OS lui-même
         clock_gettime(CLOCK_MONOTONIC_RAW, &iterationStartTime);
