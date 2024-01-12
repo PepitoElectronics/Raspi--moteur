@@ -449,104 +449,125 @@ void handle_connection(int client_socket)
     close(client_socket);
 }
 
-
-
+// Fonction exécutée par le thread de communication TCP
 void *comTCP(void *arg)
 {
+    // Structures pour les adresses du serveur et du client
     struct sockaddr_in server_address, client_address;
     socklen_t client_address_len = sizeof(client_address);
-    // Create socket
+
+    // Création du socket
     if ((server_socket = socket(AF_INET, SOCK_STREAM, 0)) == -1)
     {
-        perror("Socket creation failed");
+        perror("Échec de la création du socket");
         exit(EXIT_FAILURE);
     }
-    // Set up server address
+
+    // Configuration de l'adresse du serveur
     server_address.sin_family = AF_INET;
     server_address.sin_port = htons(PORT);
     server_address.sin_addr.s_addr = INADDR_ANY;
-    // Bind socket
+
+    // Liaison du socket avec l'adresse du serveur
     if (bind(server_socket, (struct sockaddr *)&server_address, sizeof(server_address)) == -1)
     {
-        perror("Bind failed");
+        perror("Échec de la liaison du socket");
         close(server_socket);
         exit(EXIT_FAILURE);
     }
-    // Listen for incoming connections
+
+    // Attente des connexions entrantes
     if (listen(server_socket, 5) == -1)
     {
-        perror("Listen failed");
+        perror("Échec de l'attente des connexions");
         close(server_socket);
         exit(EXIT_FAILURE);
     }
-    printf("Listening on port %d...\n", PORT);
+
+    printf("En écoute sur le port %d...\n", PORT);
+    // Boucle infinie pour accepter les connexions entrantes
     while (1)
     {
-        // Accept incoming connection
+        // Accepte la connexion entrante
         client_socket = accept(server_socket, (struct sockaddr *)&client_address, &client_address_len);
         if (client_socket == -1)
         {
-            perror("Accept failed");
+            perror("Échec de l'acceptation de la connexion");
             continue;
         }
-        printf("Accepted connection from %s:%d\n", inet_ntoa(client_address.sin_addr), ntohs(client_address.sin_port));
-        // Handle the connection in a separate function
+
+        // Affiche les informations sur le client connecté
+        printf("Connexion acceptée depuis %s:%d\n", inet_ntoa(client_address.sin_addr), ntohs(client_address.sin_port));
+
+        // Gère la connexion dans une fonction séparée
         handle_connection(client_socket);
     }
+    // Ferme le socket du serveur (ce code ne sera jamais atteint dans la boucle infinie)
     close(server_socket);
+    // Retourne NULL (non utilisé dans le contexte pthread)
     return NULL;
 }
 
+// Fonction exécutée par le thread pour changer l'état de la broche pinMasterRequest
 void *ChangeStatePin(void *arg)
-{ // 20x plus vite que le fréquence du PID à 238HZ => 4760 Hz => 5000Hz => 200 µs => 10+190 µs
+{
+    // Définition de la broche pinMasterRequest comme sortie
     pinMode(pinMasterRequest, OUTPUT);
+    // Boucle infinie pour changer périodiquement l'état de la broche
     while (1)
     {
+        // Met la broche pinMasterRequest à l'état haut
         digitalWrite(pinMasterRequest, HIGH);
+        // Attente de 100 µs
         usleep(100);
+        // Met la broche pinMasterRequest à l'état bas
         digitalWrite(pinMasterRequest, LOW);
+        // Attente de 100 µs
         usleep(100);
     }
-    return 0; // pointeur sur rien du tout
+    // Retourne NULL (non utilisé dans le contexte pthread)
+    return NULL;
 }
 
+
+// Fonction exécutée par le thread du timer logiciel temps réel
 void *rtSoftTimerThread(void *arg)
 {
-    // Changement politique et priorité
+    // Changement de la politique de planification et de la priorité du thread
     struct sched_param params;
     params.sched_priority = 99;
     pthread_setschedparam(pthread_self(), SCHED_FIFO, &params);
+
     // Vérification du changement
     int policy;
     pthread_getschedparam(pthread_self(), &policy, &params);
-    std::cout << "Thread RT:  SCHED_FIFO=" << std::boolalpha << (policy == SCHED_FIFO)
-              << "  prio=" << params.sched_priority << std::endl;
+    std::cout << "Thread RT: SCHED_FIFO=" << std::boolalpha << (policy == SCHED_FIFO)
+              << " prio=" << params.sched_priority << std::endl;
 
-    // Configuration WiringPi
+    // Configuration de WiringPi
     int wiringPiSetupStatus = wiringPiSetup();
     if (wiringPiSetupStatus != 0)
     {
-        std::cerr << "wiringPiSetupStatus=" << wiringPiSetupStatus << " ; exiting..." << std::endl;
+        std::cerr << "wiringPiSetupStatus=" << wiringPiSetupStatus << " ; Exiting..." << std::endl;
         exit(EXIT_FAILURE);
     }
 
+    // Configuration des broches
     pinMode(clockPin, OUTPUT);
     pinMode(dbgPin, OUTPUT);
     bool pinHigh = false;
 
-    // type long: d'après la commande "man clock_gettime"
+    // Période du timer en nanosecondes
     long timerPeriod_ns = 1000L * TIMER_PERIOD_US;
 
-    // On boucle sur un temps pré-défini (le temps de faire les tests)
+    // Boucle d'exécution du timer
     struct timespec startTime, iterationStartTime, sleepEndTime;
     clock_gettime(CLOCK_MONOTONIC_RAW, &startTime);
     bool continueTimer = true;
     while (continueTimer)
     {
-
-        //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-        // TODO expliquer pourquoi CLOCK_MONOTONIC_RAW est l'option de clock la + adaptéef
-        digitalWrite(dbgPin, HIGH); // pour mesure le temps approx de ce call OS lui-même
+        // Mesure du temps de début de l'itération
+        digitalWrite(dbgPin, HIGH); // pour mesurer le temps approximatif de cet appel OS lui-même
         clock_gettime(CLOCK_MONOTONIC_RAW, &iterationStartTime);
         digitalWrite(dbgPin, LOW);
 
@@ -554,71 +575,75 @@ void *rtSoftTimerThread(void *arg)
         pinHigh = !pinHigh;
         digitalWrite(clockPin, (int)pinHigh);
 
-        // TODO doc: something can be done here
+        // TODO: des opérations peuvent être effectuées à cet endroit
 
         // Condition de sortie: si le temps de run en secondes est dépassé
         if ((iterationStartTime.tv_sec - TIMER_RUN_TIME_S) > startTime.tv_sec)
             continueTimer = false;
 
         // Calcul de l'instant auquel on aimerait se réveiller, pour enchaîner directement
-        // sur la boucle suivante. Attention à gérer correctement la structure timespec,
-        // surtout les overflows de nanosecondes
+        // sur la boucle suivante. Gestion correcte des overflows de nanosecondes.
         if (iterationStartTime.tv_nsec + timerPeriod_ns >= 1000000000L)
         { // Si on passe à la seconde suivante
             sleepEndTime.tv_nsec = iterationStartTime.tv_nsec + timerPeriod_ns - 1000000000L;
             sleepEndTime.tv_sec = iterationStartTime.tv_sec + 1;
         }
         else
-        { // Sinon, cas le + simple: on ajoute juste les nanosecondes à attendre
+        { // Sinon, cas le plus simple: on ajoute juste les nanosecondes à attendre
             sleepEndTime.tv_nsec = iterationStartTime.tv_nsec + timerPeriod_ns;
             sleepEndTime.tv_sec = iterationStartTime.tv_sec;
         }
 
-        // TODO sleep_until, 2 modes (compensated or not)
+        // Fonction de sommeil jusqu'à l'instant souhaité, avec ou sans compensation
         if (USE_COMPENSATED_SLEEP)
             compensatedSleepUntil(&sleepEndTime);
         else
             naiveSleepUntil(&sleepEndTime);
     }
+
     // Fin du thread
     digitalWrite(clockPin, LOW);
     digitalWrite(dbgPin, LOW);
     std::cout << "Thread RT a terminé" << std::endl;
-    return 0; // pointeur sur rien du tout
+
+    // Retourne NULL (non utilisé dans le contexte pthread)
+    return NULL;
 }
 
+// Fonction exécutée par le thread du correcteur PID temps réel
 void *rtSoftTimerThreadCorrecteur(void *arg)
 {
-    // Changement politique et priorité
+    // Changement de la politique de planification et de la priorité du thread
     struct sched_param params;
     params.sched_priority = 99;
     pthread_setschedparam(pthread_self(), SCHED_FIFO, &params);
+
     // Vérification du changement
     int policy;
     pthread_getschedparam(pthread_self(), &policy, &params);
-    std::cout << "Thread RT:  SCHED_FIFO=" << std::boolalpha << (policy == SCHED_FIFO)
-              << "  prio=" << params.sched_priority << std::endl;
-    /******************************************************/
-    /***************** code perso correcteur :  variables*******************/
+    std::cout << "Thread RT: SCHED_FIFO=" << std::boolalpha << (policy == SCHED_FIFO)
+              << " prio=" << params.sched_priority << std::endl;
+
+    /*************** Code personnel correcteur PID : Variables ***************/
     // Utilisation de sem_wait pour attendre que le sémaphore devienne disponible
     sem_wait(semDemarrage);
-    // Etape 2 : Ziegler-Nichols
 
-    float Te = 0.004;
-    float Tc = 0.226;
-    float Ti = 0.83 * Tc;
-    float Td = (Tc / 8);
-    float Ki = 1 / Ti;
-    float Kd = 1 / Td;
+    // Étape 2 : Ziegler-Nichols
+    float Te = 0.004; //Période d'échantillonnage du système
+    float Tc = 0.226; // Temps critique de la méthode de Ziegler-Nichols
+    float Ti = 0.83 * Tc; // Temps d'intégration (Gestion des erreurs à long terme)
+    float Td = (Tc / 8); // Temps de dérivation (Anticipation des erreurs futures)
+    float Ki = 1 / Ti; //Gain intégral 
+    float Kd = 1 / Td; //Gain dérivé
 
-    float accumulIntegral = 0;
-    float proportionnel = 0;
-    float derive = 0;
-    float integral = 0;
-    float sortie = 0;
-    float DeltaT = 0.004;
-    int compteurErreur = 0;
-    int variableBoucle = 0;
+float accumulIntegral = 0; // Variable pour stocker l'accumulation des erreurs intégrales
+float proportionnel = 0;   // Variable pour stocker la contribution proportionnelle du PID
+float derive = 0;         // Variable pour stocker la contribution dérivée du PID
+float integral = 0;       // Variable pour stocker la contribution intégrale du PID
+float sortie = 0;         // Variable pour stocker la sortie totale du PID
+float DeltaT = 0.004;      // Temps d'échantillonnage du PID (période d'échantillonnage)
+int compteurErreur = 0;    // Compteur utilisé pour détecter des conditions d'erreur spécifiques
+int variableBoucle = 0;    // Variable de comptage de boucles 
 
     Kp = 0.3;
     angleConsigne = consigne;
@@ -628,9 +653,10 @@ void *rtSoftTimerThreadCorrecteur(void *arg)
     Kd = Kd / 10000;
     ecartPrecedent = 0;
 
+    // Calcul du facteur de correction du gain proportionnel sur base des courbes empiriques
     if (angleConsigne <= 2500)
     {
-        DiviseurKp = (0.0000016 * exptt(angleConsigne, 2)) + (0.0001136 * exptt(angleConsigne, 1)) + 0.0497947; //(0.00000000000049502762*exptt(consigne,4))- (0.00000000507315463776*exptt(consigne,3)) + (0.00001619760699757390*exptt(consigne,2 ))- (0.01213462811081350000*exptt(consigne,1))+ 5.60653903558871000000;
+        DiviseurKp = (0.0000016 * exptt(angleConsigne, 2)) + (0.0001136 * exptt(angleConsigne, 1)) + 0.0497947;
     }
     else if (angleConsigne <= 10000)
     {
@@ -640,11 +666,9 @@ void *rtSoftTimerThreadCorrecteur(void *arg)
     {
         DiviseurKp = 32;
     }
-    /******************************************************/
-    // type long: d'après la commande "man clock_gettime"
-    // long timerPeriod_ns = 1000L * TIMER_PERIOD_US;
+
+    /*************** Boucle principale du correcteur PID ***************/
     long timerPeriod_ns = 1000L * PERIODE_CORRECTEUR;
-    // On boucle sur un temps pré-défini (le temps de faire les tests)
     struct timespec startTime, iterationStartTime, sleepEndTime;
     clock_gettime(CLOCK_MONOTONIC_RAW, &startTime);
     bool continueTimer = true;
@@ -652,13 +676,13 @@ void *rtSoftTimerThreadCorrecteur(void *arg)
     while (continueTimer)
     {
         variableBoucle++;
-        // TODO expliquer pourquoi CLOCK_MONOTONIC_RAW est l'option de clock la + adaptée
-        digitalWrite(dbgPin, HIGH); // pour mesure le temps approx de ce call OS lui-même
+
+        // Mesure du temps de début de l'itération
+        digitalWrite(dbgPin, HIGH); // pour mesurer le temps approximatif de cet appel OS lui-même
         clock_gettime(CLOCK_MONOTONIC_RAW, &iterationStartTime);
         digitalWrite(dbgPin, LOW);
 
-        // TODO doc: something can be done here
-        /************************ Code correcteur PID perso ******************************/
+        /*************** Calcul de l'erreur ***************/
         pthread_mutex_lock(&mutexAngle);
         int angleCorrecteur = angle;
         pthread_mutex_unlock(&mutexAngle);
@@ -666,6 +690,7 @@ void *rtSoftTimerThreadCorrecteur(void *arg)
         ecart = angleConsigne - angleCorrecteur;
 
         int Erreur = 0;
+        // Si la situation n'a pas changé
         if ((sortie > 300) && (abs(ecart) > 10) && (ecart == ecartPrecedent))
         {
             Erreur = 1;
@@ -675,6 +700,7 @@ void *rtSoftTimerThreadCorrecteur(void *arg)
             }
             std::cout << "Erreur détectée !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!" << std::endl;
         }
+
         switch (Erreur)
         {
         case 1: // Rotor bloqué
@@ -683,7 +709,6 @@ void *rtSoftTimerThreadCorrecteur(void *arg)
             std::cout << "compteurErreur " << compteurErreur << std::endl;
             if (compteurErreur == (((int)PERIODE_ECHEC) / ((int)PERIODE_CORRECTEUR)))
             {
-                // Erreur = 1000;
                 PWM(0);
                 compteurErreur = 0;
                 fprintf(stderr, "Erreur détectée, moteur arrêté, angle actuel : %d\n", angleCorrecteur);
@@ -698,6 +723,7 @@ void *rtSoftTimerThreadCorrecteur(void *arg)
             std::cout << "Relais éteint " << std::endl;
             return NULL;
         }
+
         std::cout << "DiviseurKp : " << DiviseurKp << std::endl;
         int PWM_FCT_Ecart = (int)((abs(ecart) / 360) * 1024);
         integral = (Ki * Te * ecart) + (FacteurOubli * integral);
@@ -705,8 +731,6 @@ void *rtSoftTimerThreadCorrecteur(void *arg)
         std::cout << "ecart : " << ecart << std::endl;
         sortie = abs(Kp * (ecart + integral + ((Kd / Te) * (ecart - ecartPrecedent))));
         std::cout << "sortie : " << sortie << std::endl;
-        // std::cout << "sortie : "<<sortie<<std::endl;
-        // sortie = Kp*(proportionnel + integral);
 
         if (ecart > 0)
         {
@@ -718,38 +742,40 @@ void *rtSoftTimerThreadCorrecteur(void *arg)
         }
         PWM(sortie);
         ecartPrecedent = ecart;
+
         if (variableBoucle % 5 == 0)
         {
             ecartDixPrecedent = ecart;
         }
-        // usleep((int)PERIODE_CORRECTEUR);
-        /********************************************************************/
-        // Calcul de l'instant auquel on aimerait se réveiller, pour enchaîner directement
-        // sur la boucle suivante. Attention à gérer correctement la structure timespec,
-        // surtout les overflows de nanosecondes
+
+        /*************** Calcul de l'instant souhaité de réveil ***************/
         if (iterationStartTime.tv_nsec + timerPeriod_ns >= 1000000000L)
-        { // Si on passe à la seconde suivante
+        {
             sleepEndTime.tv_nsec = iterationStartTime.tv_nsec + timerPeriod_ns - 1000000000L;
             sleepEndTime.tv_sec = iterationStartTime.tv_sec + 1;
         }
         else
-        { // Sinon, cas le + simple: on ajoute juste les nanosecondes à attendre
+        {
             sleepEndTime.tv_nsec = iterationStartTime.tv_nsec + timerPeriod_ns;
             sleepEndTime.tv_sec = iterationStartTime.tv_sec;
         }
 
-        // TODO sleep_until, 2 modes (compensated or not)
+        /*************** Sommeil jusqu'à l'instant souhaité ***************/
         if (USE_COMPENSATED_SLEEP)
             compensatedSleepUntil(&sleepEndTime);
         else
             naiveSleepUntil(&sleepEndTime);
     }
+
     // Fin du thread
     digitalWrite(clockPin, LOW);
     digitalWrite(dbgPin, LOW);
     std::cout << "Thread RT a terminé" << std::endl;
-    return 0; // pointeur sur rien du tout
+
+    // Retourne NULL (non utilisé dans le contexte pthread)
+    return NULL;
 }
+
 
 void *clockTimer(void *arg)
 {
@@ -769,7 +795,7 @@ void *clockTimer(void *arg)
     */
     return NULL;
 }
-
+// Calcul de la différence entre deux structures timespec
 void timespecDiff(const struct timespec *start, const struct timespec *end, struct timespec *duration)
 {
     // TODO gérer diffs > 1s
@@ -779,7 +805,7 @@ void timespecDiff(const struct timespec *start, const struct timespec *end, stru
         duration->tv_nsec = end->tv_nsec - start->tv_nsec;
 }
 
-// Solution dite "naïve", qui ne prend pas en compte les latences de l'OS (même si RTOS)
+// Attente simple jusqu'à un temps spécifié
 void naiveSleepUntil(struct timespec *sleepEndTime)
 {
     struct timespec sleepStartTime, sleepDuration;
@@ -789,7 +815,7 @@ void naiveSleepUntil(struct timespec *sleepEndTime)
     nanosleep(&sleepDuration, 0); // TODO gérer erreurs et remaining time
 }
 
-// Solution améliorée
+// Attente compensée prenant en compte la latence maximale du système d'exploitation
 void compensatedSleepUntil(struct timespec *sleepEndTime)
 {
     // TODO define du temps pris par clock_gettime
@@ -820,7 +846,7 @@ void compensatedSleepUntil(struct timespec *sleepEndTime)
     } while (activePauseDuration.tv_nsec > CLOCK_GETTIME_AVG_DURATION_NS);
 }
 
-// Création et initialisation de la structure POSIX
+// Gestionnaire de signal pour SIGTERM
 void generalSignalHandler(int signal)
 {
     if (signal == SIGTERM)
@@ -834,7 +860,8 @@ void generalSignalHandler(int signal)
     else
         std::cerr << "Signal non-géré" << std::endl;
 }
-// Activation des destructions__________________________________________________
+
+// Fonction de terminaison du programme, libération des ressources
 void terminerProgramme()
 {
     free(semDemarrage);
