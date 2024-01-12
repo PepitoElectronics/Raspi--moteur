@@ -248,302 +248,185 @@ void initRelais()
     std::cout << "Relais OK " << std::endl;
 }
 
+// Fonction pour initialiser la broche de réception (RX)
 void initRX()
 {
+    // Configuration de la broche RX en mode entrée
     pinMode(RXPin, INPUT);
 }
 
+// Fonction pour initialiser la broche de transmission (TX)
 void initTX()
 {
+    // Configuration de la broche TX en mode sortie
     pinMode(TXPin, OUTPUT);
+    // Mise à un initial de la broche TX
     digitalWrite(TXPin, HIGH);
 }
+Voici une explication détaillée des commentaires pour les deux fonctions exp2 et exptt :
 
-/*
- void TX(){
+cpp
 
-digitalWrite(TXPin, LOW);
-int stateRX=1;
-while(stateRX!=0){
-stateRX=digitalRead(RXPin);18
-std::cout << "Attend RX" << std::endl;
-usleep(1);
-
-}
-int nBitsEnvoye=0;
-while(nBitsEnvoye<nBitsAEnvoyer){
-//std::cout << "ID boucle : " << nBitsEnvoye << std::endl;
-pthread_mutex_lock(&mutexINC);
-if(INC==ratioTemps/2){
-digitalWrite(TXPin, HIGH);
-std::cout << "Front montant" << std::endl;
-} else if(INC==ratioTemps){
-digitalWrite(TXPin, LOW);
-messageRX[nBitsEnvoye]=digitalRead(RXPin);
-nBitsEnvoye+=1;
-std::cout << "Front descendant" << std::endl;
-}
-pthread_mutex_unlock(&mutexINC);
-}
-std::cout << "Fin message" << std::endl;
-digitalWrite(TXPin, HIGH);
-}
- * */
-
+// Fonction pour calculer 2^exponent
 int exp2(int exponent)
 {
+    // Initialisation de la base à 2 et du résultat à 1
     int base = 2;
     int result_multiply = 1;
-
+    // Boucle pour multiplier la base par elle-même exponent fois
     for (int i = 0; i < exponent; ++i)
     {
         result_multiply *= base;
     }
+    // Retourne le résultat de l'élévation à la puissance
     return result_multiply;
 }
 
+// Fonction pour calculer base^exponent
 int exptt(int base, int exponent)
 {
+    // Initialisation du résultat à 1
     int result_multiply = 1;
+    // Boucle pour multiplier la base par elle-même exponent fois
     for (int i = 0; i < exponent; ++i)
     {
         result_multiply *= base;
     }
+    // Retourne le résultat de l'élévation à la puissance
     return result_multiply;
 }
-
+// Fonction qui assure la transmission des données en respectant le cahier des charges fourni pour la liaison série
 void TXnaif()
 {
+    // Variable pour indiquer l'état de la broche TX
     bool pinHigh = false;
+    // Met la broche TX en état bas
     digitalWrite(TXPin, LOW);
-    // int local_consigne = consigne;
+    // Attente de l'état bas de la broche RX
     int stateRX = 1;
     while (stateRX != 0)
     {
         stateRX = digitalRead(RXPin);
-        // std::cout << "Attend RX" << std::endl;
         usleep(1);
     }
+    // Nombre de bits envoyés initialisé à zéro
     int nBitsEnvoye = 0;
+    // Boucle pour envoyer tous les bits
     while (nBitsEnvoye < nBitsAEnvoyer)
     {
+        // Délai avant de passer la broche TX à l'état haut
         usleep(50);
         digitalWrite(TXPin, HIGH);
-        // std::cout << "Front montant" << std::endl;
+        // Délai pour attendre le front montant
         usleep(25);
+        // Lecture du bit sur la broche RX et stockage dans le tableau messageRX
         messageRX[nBitsEnvoye] = digitalRead(RXPin);
         nBitsEnvoye += 1;
+        // Délai avant de passer la broche TX à l'état bas
         usleep(25);
         digitalWrite(TXPin, LOW);
-        // std::cout << "Front descendant" << std::endl;
+        // Délai pour attendre le front descendant
     }
-    // std::cout << "Fin message" << std::endl;
+    // Passe la broche TX à l'état haut
     digitalWrite(TXPin, HIGH);
-
+    // Initialisation de la variable pour stocker le résultat
     int resultat = 0;
+    // Boucle pour convertir le tableau de bits en un nombre entier
     for (int i = 0; i < 16; i++)
     {
-        // std::cout << "messageRX case n° "<< i<< " : " << messageRX[i] <<std::endl;
         resultat = resultat + (messageRX[i] * exp2(i));
     }
-    // std::cout << "resultat : "<<resultat<<std::endl;
+    // Délai avant de continuer
     usleep(2000);
+    // Verrouillage du mutex pour assurer l'accès sécurisé à la variable angle
     pthread_mutex_lock(&mutexAngle);
+    // Mise à jour de la variable angle
     anglePrecedent = angle;
     angle = resultat;
+    // Correction de l'angle si la différence avec l'angle précédent est trop grande
     if (abs(angle - anglePrecedent) > 30000)
     {
         angle = resultat - angleMax;
     }
+    // Déverrouillage du mutex
     pthread_mutex_unlock(&mutexAngle);
 }
 
+// Fonction exécutée par le thread de transmission (TX)
 void *TX(void *arg)
 {
-
-    // Changement politique et priorité
+    // Changement de la politique de planification et de la priorité du thread
     struct sched_param params;
     params.sched_priority = 50;
     pthread_setschedparam(pthread_self(), SCHED_FIFO, &params);
-    // Vérification du changement*/
 
+    // Vérification du changement
     int policy;
     pthread_getschedparam(pthread_self(), &policy, &params);
-    std::cout << "Thread RT:  SCHED_FIFO=" << std::boolalpha << (policy == SCHED_FIFO)
-              << "  prio=" << params.sched_priority << "!!!!!!!!" << std::endl;
+    std::cout << "Thread RT: SCHED_FIFO=" << std::boolalpha << (policy == SCHED_FIFO)
+              << " prio=" << params.sched_priority << "!!!!!!!!" << std::endl;
 
+    // Attente du signal de démarrage du thread
     sem_wait(semDemarrageCom);
+    // Boucle infinie pour la transmission série
     while (1)
     {
         TXnaif();
     }
+
+    // Retourne NULL (non utilisé dans le contexte pthread)
     return NULL;
 }
-
+// Fonction pour lire l'état de la broche RX
 int readRX()
 {
+    // Retourne l'état de la broche RX (numéro de la broche)
     return RXPin;
 }
 
-void FonctionnementNormal()
-{
-}
-
-/*
-void* Correcteur(void* arg){
-// Utilisation de sem_wait pour attendre que le sémaphore devienne disponible
-sem_wait(semDemarrage);
-
-
-// Etape 2 : Ziegler-Nichols
-//int angleConsigne=(int)consigne;
-angleConsigne = consigne;
-//int Gain=(int)gain;
-//int nvc = 0;
-float Te=0.004;
-float Tc=0.226;
-Kp=0.3;
-float Ti=0.83*Tc;
-float Td=(Tc/8);
-float Ki=1/Ti;
-float Kd=1/Td;
-
-
-
-
-DiviseurKp=0;
-if(angleConsigne<=2500){
-DiviseurKp=(0.0000016*exptt(angleConsigne,2)) + (0.0001136*exptt(angleConsigne,1)) + 0.0497947;//(0.00000000000049502762*exptt(consigne,4))- (0.00000000507315463776*exptt(consigne,3)) + (0.00001619760699757390*exptt(consigne,2 ))- (0.01213462811081350000*exptt(consigne,1))+ 5.60653903558871000000;
-} else if (angleConsigne<=10000) {
-DiviseurKp= (0.002*angleConsigne)+5;
-} else {
-DiviseurKp=32;
-}
-
-
-//Kp=Kp/25;//5000
-//Kp = Kp/2.85;
-Kp = Kp/DiviseurKp;
-Ki=Ki/1;
-Kd=Kd/10000;
-
-
-float accumulIntegral=0;
-ecartPrecedent=0;
-
-float proportionnel=0;
-float derive=0;
-float integral=0;
-
-float sortie = 0;
-float DeltaT=0.004;
-
-int compteurErreur = 0;
-
-
-
-  while(1){
-pthread_mutex_lock(&mutexAngle);
-int angleCorrecteur=angle;
-pthread_mutex_unlock(&mutexAngle);
-
-ecart=angleConsigne-angleCorrecteur;
-
-  int Erreur=0;
-  if((sortie>500)&&(ecart==ecartPrecedent)){
-  Erreur=1;
-  }
-  switch (Erreur) {
-case 1: // Rotor bloqué
-//PWM(0);
-//perror("Erreur Rotor bloqué");
-//std::cout << "Erreur Rotor bloqué "<<std::endl;
-//return NULL;
-compteurErreur++;
-std::cout << "compteurErreur "<< compteurErreur  <<std::endl;
-if(compteurErreur==(((int)PERIODE_ECHEC)/((int)PERIODE_CORRECTEUR))){
-//Erreur = 1000;
-PWM(0);
-compteurErreur=0;
-fprintf(stderr,"Erreur détectée, moteur arrêté, angle actuel : %f",angleCorrecteur);
-std::cout << "angleCorrecteur "<< angleCorrecteur  <<std::endl;
-std::cout << "compteurErreur "<< compteurErreur  <<std::endl;
-return NULL;
-}
-break;
-case 2: // Relais éteint
-PWM(0);
-std::cout << "Relais éteint "<<std::endl;
-compteurErreur 1250
-Erreur détectée, moteur arrêté, angle actuel : 8924
-angleCorrecteur 8924
-compteurErreur 0
-
-return NULL;
-  }
-std::cout << "DiviseurKp : "<<DiviseurKp<<std::endl;
-
-int PWM_FCT_Ecart = (int)((abs(ecart)/360)*1024);
-integral=(Ki*Te*ecart)+(FacteurOubli*integral);
-
-std::cout << "integral : "<<integral<<std::endl;
-std::cout << "ecart : "<<ecart<<std::endl;
-
-sortie = abs(Kp*(ecart + integral + ((Kd/Te) * (ecart-ecartPrecedent))));
-std::cout << "sortie : "<<sortie<<std::endl;
-//std::cout << "sortie : "<<sortie<<std::endl;
-//sortie = Kp*(proportionnel + integral);
-
-if(ecart>0){
-initSR(1);
-} else if(ecart<0){
-initSR(0);
-}
-//PWM(sortie*ecart);
-//std::cout << "PWM : "<<PWM_FCT_Ecart<<std::endl;
-
-PWM(sortie);
-
-ecartPrecedent = ecart;
-usleep((int)PERIODE_CORRECTEUR);
-
-}
-return NULL;
-}
-*/
-
+// Fonction pour désactiver et libérer une broche de relais spécifiée
 void finRelais(int choix)
 {
+    // Vérification du choix de la broche de relais
     if (choix == 0)
     {
+        // Désactive la broche d'alimentation du relais
         digitalWrite(pwrRelPin, LOW);
+        // Change le mode de la broche en mode entrée (INPUT)
         pinMode(pwrRelPin, INPUT);
     }
     else if (choix == 1)
     {
+        // Désactive la broche de relais logique
         digitalWrite(lgcRelPin, LOW);
+        // Change le mode de la broche en mode entrée (INPUT)
         pinMode(lgcRelPin, INPUT);
     }
 }
 
+// Fonction qui gère la connexion avec le client
 void handle_connection(int client_socket)
 {
+    // Tampon pour stocker les données reçues
     char buffer[BUFFER_SIZE];
+    // Valeur par défaut de la donnée reçue
     int received_value = 1;
-    // Receive the character string representing the non-signed integer
+    // Reçoit la chaîne de caractères représentant l'entier non signé
     ssize_t bytes_received = recv(client_socket, buffer, sizeof(buffer) - 1, 0);
+    // Vérifie la réception réussie des données
     if (bytes_received > 0)
     {
-        // buffer[bytes_received] = '\0';
-
-        // Convert the character string to an integer
+        // Convertit la chaîne de caractères en entier
         received_value = atoi(buffer);
-        printf("Received integer value: %d \n", received_value);
+        printf("Valeur entière reçue du client : %d\n", received_value);
+        // Met à jour la variable d'angle consigne
         angleConsigne = received_value;
+        // Calcule l'écart entre l'angle consigne et l'angle actuel
         ecart = received_value - angle;
+        // Détermine le diviseur pour le calcul de Kp en fonction de l'écart
         if (ecart <= 2500)
         {
-            DiviseurKp = (0.0000016 * exptt(ecart, 2)) + (0.0001136 * exptt(ecart, 1)) + 0.0497947; //(0.00000000000049502762*exptt(consigne,4))- (0.00000000507315463776*exptt(consigne,3)) + (0.00001619760699757390*exptt(consigne,2 ))- (0.01213462811081350000*exptt(consigne,1))+ 5.60653903558871000000;
+            DiviseurKp = (0.0000016 * exptt(ecart, 2)) + (0.0001136 * exptt(ecart, 1)) + 0.0497947;
         }
         else if (ecart <= 10000)
         {
@@ -553,16 +436,20 @@ void handle_connection(int client_socket)
         {
             DiviseurKp = 32;
         }
-        // Kp=Kp/25;//5000
-        // Kp = Kp/2.85;
+        // Calcule la valeur de Kp en fonction du diviseur
         Kp = 0.3 / DiviseurKp;
     }
     else
     {
-        perror("Error receiving data");
+        // Affiche une erreur en cas de problème de réception des données
+        perror("Erreur lors de la réception des données");
     }
+
+    // Ferme la connexion avec le client
     close(client_socket);
 }
+
+
 
 void *comTCP(void *arg)
 {
