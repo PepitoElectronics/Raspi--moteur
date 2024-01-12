@@ -225,14 +225,10 @@ void initSR(int sens)
 
 void PWM(int rc)
 {
-    /*
-        // Définir la fréquence PWM
-        pwmSetMode(PWM_MODE_MS);
-        pwmSetClock(384);  // Fréquence de base de 19.2 MHz divisée par 384 donne 50 kHz
-        pwmSetRange(1024); // Plage de valeurs pour le rapport cyclique (de 0 à 1023)
-    */
-    int rapport_cyclique = 1024; // 50% de rapport cyclique par défaut
-
+    // Définir la fréquence PWM
+    pwmSetMode(PWM_MODE_MS);
+    pwmSetClock(384);  // Fréquence de base de 19.2 MHz divisée par 384 donne 50 kHz
+    pwmSetRange(1024); // Plage de valeurs pour le rapport cyclique (de 0 à 1023)
     // Définir le rapport cyclique initial
     pwmWrite(pwmPin, rc);
 }
